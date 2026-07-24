@@ -1,0 +1,24 @@
+# Agent Guide
+
+Read `README.md` before making gameplay or architectural changes.
+
+## Principles
+
+- Keep game state local to `Game`; input enters through `Input`, application
+  transitions leave through `Control`, and drawing does not mutate simulation
+  state.
+- Prefer direct data flow and ordinary Rust data types over frameworks or
+  speculative abstractions.
+- Everything a developer does goes through `mise run`.
+- Keep Clippy, formatting, tests, docs, packaging, and dependency policy green.
+- Do not add asset-pipeline or ECS dependencies without a measured need.
+
+## Commands
+
+- `mise run play`: run the game.
+- `mise run play:web`: run the game in a browser.
+- `mise run standards`: format the project.
+- `mise run standards:check`: run the complete local CI gate.
+
+Generated output belongs in `target/`, `.cargo-tools/`, or `sbom/` and must not
+be committed.

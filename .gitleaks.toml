@@ -1,0 +1,14 @@
+title = "Project secret scanning"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated dependency, build, cache, and release-output paths"
+paths = [
+  '''(^|/)\.cache/''',
+  '''(^|/)\.cargo-tools/''',
+  '''(^|/)\.git/''',
+  '''(^|/)sbom/''',
+  '''(^|/)target/''',
+]

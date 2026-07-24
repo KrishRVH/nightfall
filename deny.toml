@@ -1,0 +1,29 @@
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2025-0035", reason = "Macroquad 0.4.15 is the requested current release; no fixed release exists." },
+    { id = "RUSTSEC-2026-0192", reason = "Macroquad pins fontdue to this ttf-parser release; no safe upgrade exists." },
+]
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+highlight = "all"
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+unknown-git = "deny"
+unknown-registry = "deny"

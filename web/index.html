@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="data:,">
+    <title>Nightfall</title>
+    <style>
+      html,
+      body,
+      canvas {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #0e0b1a;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="glcanvas" tabindex="0" aria-label="Nightfall game"></canvas>
+    <script src="miniquad.js"></script>
+    <script>
+      load("nightfall.wasm");
+    </script>
+  </body>
+</html>

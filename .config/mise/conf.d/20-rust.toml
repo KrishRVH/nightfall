@@ -1,0 +1,147 @@
+[tools]
+rust = "1.97.1"
+
+[tasks."rust:components"]
+description = "Install Rust formatter and linter components"
+run = """
+set -eu
+toolchain="$(rustc -vV | sed -n 's/^host: //p')"
+version="$(rustc --version | awk '{print $2}')"
+rustup component add --toolchain "$version-$toolchain" rustfmt clippy
+"""
+
+[tasks."rust:web:components"]
+description = "Install the Rust WebAssembly target"
+run = """
+set -eu
+toolchain="$(rustc -vV | sed -n 's/^host: //p')"
+version="$(rustc --version | awk '{print $2}')"
+rustup target add --toolchain "$version-$toolchain" wasm32-unknown-unknown
+"""
+
+[tasks."rust:deny:install"]
+description = "Install pinned cargo-deny"
+wait_for = ["rust:components"]
+run = """
+set -eu
+cargo_deny_version="0.19.9"
+cargo_tools_dir="${CARGO_TOOLS_DIR:-.cargo-tools}"
+cargo_deny="$cargo_tools_dir/bin/cargo-deny"
+if [ ! -x "$cargo_deny" ] || ! "$cargo_deny" --version | grep -qxF "cargo-deny $cargo_deny_version"; then
+  cargo install cargo-deny --version "$cargo_deny_version" --locked --root "$cargo_tools_dir"
+fi
+"""
+
+[tasks."rust:lock"]
+description = "Refresh Cargo.lock"
+run = "cargo generate-lockfile"
+
+[tasks."rust:lock:check"]
+description = "Ensure Cargo.lock exists and matches Cargo metadata"
+run = """
+set -eu
+if [ ! -f Cargo.lock ]; then
+  if [ "${CI:-false}" = "true" ]; then
+    echo "Cargo.lock is required in CI. Run mise run rust:lock:check locally and commit Cargo.lock." >&2
+    exit 1
+  fi
+  cargo generate-lockfile
+fi
+cargo metadata --locked --format-version=1 >/dev/null
+"""
+
+[tasks."rust:fmt"]
+description = "Format Rust code"
+depends = ["rust:components"]
+run = "cargo fmt --all"
+
+[tasks."rust:fmt:check"]
+description = "Check Rust formatting"
+depends = ["rust:components"]
+run = "cargo fmt --all -- --check"
+
+[tasks."rust:lint"]
+description = "Run Clippy for all Rust workspace targets/features"
+depends = ["rust:components", "rust:lock:check"]
+wait_for = ["rust:fmt:check"]
+run = "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"
+
+[tasks."rust:test"]
+description = "Run Rust tests for all workspace targets/features"
+depends = ["rust:lock:check"]
+wait_for = ["rust:lint"]
+run = "cargo test --workspace --all-targets --all-features --locked"
+
+[tasks."rust:test:doc"]
+description = "Run Rust doctests"
+depends = ["rust:lock:check"]
+wait_for = ["rust:test"]
+run = """
+set -eu
+if cargo metadata --no-deps --format-version=1 --locked | grep -Eq '"kind":\\["(lib|rlib|dylib|cdylib|staticlib|proc-macro)"'; then
+  cargo test --workspace --doc --all-features --locked
+else
+  echo "No library target; no doctests to run."
+fi
+"""
+
+[tasks."rust:doc"]
+description = "Build Rust documentation with warnings denied"
+depends = ["rust:lock:check"]
+wait_for = ["rust:test:doc"]
+run = "RUSTDOCFLAGS=\"-D warnings -D missing_docs\" cargo doc --workspace --all-features --no-deps --locked"
+
+[tasks."rust:package"]
+description = "Validate Rust package contents"
+depends = ["rust:lock:check"]
+wait_for = ["rust:doc"]
+run = "cargo package --workspace --allow-dirty --locked"
+
+[tasks."rust:web:check"]
+description = "Check the browser build"
+depends = ["rust:web:build"]
+run = "cargo check --workspace --all-features --target wasm32-unknown-unknown --locked"
+
+[tasks."rust:web:build"]
+description = "Build browser-ready Nightfall files"
+depends = ["rust:lock:check", "rust:web:components"]
+run = """
+set -eu
+cargo build --release --target wasm32-unknown-unknown --locked
+# Optional Macroquad plugins are disabled, so package Miniquad's core runtime.
+miniquad_runtime="$(
+  cargo metadata --format-version=1 --locked |
+    python3 -c 'import json, pathlib, sys; packages = json.load(sys.stdin)["packages"]; manifest = next(package["manifest_path"] for package in packages if package["name"] == "miniquad"); print(pathlib.Path(manifest).parent / "js" / "gl.js")'
+)"
+rm -rf target/web
+mkdir -p target/web
+cp web/index.html target/web/index.html
+cp "$miniquad_runtime" target/web/miniquad.js
+cp target/wasm32-unknown-unknown/release/nightfall.wasm target/web/nightfall.wasm
+"""
+
+[tasks."rust:deny"]
+description = "Run cargo-deny dependency policy checks"
+depends = ["rust:deny:install", "rust:lock:check"]
+run = """
+set -eu
+cargo_tools_dir="${CARGO_TOOLS_DIR:-.cargo-tools}"
+"$cargo_tools_dir/bin/cargo-deny" --workspace --all-features --locked check -A license-not-encountered
+"""
+
+[tasks."rust:standards"]
+description = "Run the Rust standards workflow with autofixes"
+depends = ["rust:fmt"]
+
+[tasks."rust:standards:check"]
+description = "Run the Rust standards CI gate"
+depends = [
+  "rust:fmt:check",
+  "rust:lint",
+  "rust:test",
+  "rust:test:doc",
+  "rust:doc",
+  "rust:package",
+  "rust:web:check",
+  "rust:deny",
+]

@@ -1,0 +1,89 @@
+min_version = "2026.6.12"
+
+[settings]
+lockfile = true
+
+[tools]
+gitleaks = "8.30.1"
+syft = "1.45.1"
+
+[tasks.install]
+description = "Install pinned project tools"
+run = "mise install"
+
+[tasks.lock]
+description = "Refresh mise.lock after tool-version changes"
+run = "mise lock"
+
+[tasks.tasks]
+description = "List available project tasks"
+run = "mise tasks"
+
+[tasks.play]
+description = "Run Nightfall"
+depends = ["rust:lock:check"]
+run = "cargo run --release --locked"
+
+[tasks."play:web"]
+description = "Run Nightfall in a browser"
+depends = ["rust:web:build"]
+run = """
+set -eu
+web_port="${NIGHTFALL_WEB_PORT:-8000}"
+web_url="http://localhost:$web_port"
+python3 -m http.server "$web_port" --bind 127.0.0.1 --directory target/web &
+web_server_pid="$!"
+trap 'kill "$web_server_pid" 2>/dev/null || true' EXIT HUP INT TERM
+sleep 0.25
+# A backgrounded bind failure would otherwise look like a live server.
+if ! kill -0 "$web_server_pid" 2>/dev/null; then
+  wait "$web_server_pid"
+fi
+echo "Nightfall is running at $web_url"
+if command -v cmd.exe >/dev/null 2>&1; then
+  cmd.exe /c start "" "$web_url" >/dev/null 2>&1 || true
+elif command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "$web_url" >/dev/null 2>&1 || true
+fi
+wait "$web_server_pid"
+"""
+
+[tasks.fmt]
+description = "Format the project"
+run = [{ task = "rust:fmt" }]
+
+[tasks."fmt:check"]
+description = "Check project formatting"
+run = [{ task = "rust:fmt:check" }]
+
+[tasks.lint]
+description = "Lint the project"
+run = [{ task = "rust:lint" }]
+
+[tasks.test]
+description = "Test the project"
+run = [{ task = "rust:test" }]
+
+[tasks.secrets]
+description = "Scan the working tree for secrets"
+run = "gitleaks dir . --redact --no-banner"
+
+[tasks.standards]
+description = "Run standards with safe autofixes"
+depends = ["rust:standards"]
+
+[tasks."standards:check"]
+description = "Run the complete CI-grade standards gate"
+depends = ["secrets", "rust:standards:check"]
+
+[tasks.sbom]
+description = "Generate a CycloneDX JSON SBOM"
+run = """
+set -eu
+source_name="${SYFT_SOURCE_NAME:-$(basename "$PWD")}"
+source_version="${SYFT_SOURCE_VERSION:-0.0.0}"
+export SYFT_CHECK_FOR_APP_UPDATE="${SYFT_CHECK_FOR_APP_UPDATE:-false}"
+rm -rf sbom
+mkdir -p sbom
+syft scan dir:. --source-name "$source_name" --source-version "$source_version" --exclude ./sbom --exclude ./.git --output cyclonedx-json=sbom/sbom.cdx.json
+"""

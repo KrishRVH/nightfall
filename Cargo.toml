@@ -1,0 +1,68 @@
+[package]
+name = "nightfall"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "A polished, asset-free Vampire Survivors-style Macroquad teaching game."
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+publish = false
+
+[dependencies]
+macroquad = { version = "0.4.15", default-features = false }
+
+# Practical strict-by-default linting baseline.
+[lints.rust]
+future_incompatible = { level = "deny", priority = -1 }
+unexpected_cfgs = "deny"
+unreachable_pub = "warn"
+unsafe_code = "forbid"
+
+[lints.rustdoc]
+all = { level = "warn", priority = -1 }
+bare_urls = "deny"
+broken_intra_doc_links = "deny"
+invalid_codeblock_attributes = "deny"
+invalid_rust_codeblocks = "deny"
+private_intra_doc_links = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+correctness = { level = "deny", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+
+cast_lossless = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+
+allow_attributes_without_reason = "warn"
+dbg_macro = "deny"
+expect_used = "warn"
+let_underscore_must_use = "warn"
+map_err_ignore = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+unused_result_ok = "warn"
+unwrap_used = "warn"
+wildcard_dependencies = "deny"
+
+enum_variant_names = "allow"
+missing_const_for_fn = "allow"
+module_name_repetitions = "allow"
+needless_pass_by_value = "allow"
+only_used_in_recursion = "allow"
+option_if_let_else = "allow"
+
+# `unreachable_pub` requires crate visibility where this Clippy lint prefers `pub`.
+redundant_pub_crate = "allow"
+
+# Coordinate arithmetic is clearer here than pervasive `mul_add` calls.
+suboptimal_flops = "allow"
+uninlined_format_args = "allow"
+use_self = "allow"
+wildcard_imports = "allow"
