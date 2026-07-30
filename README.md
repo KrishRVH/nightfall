@@ -20,10 +20,12 @@ mise run play:web
 The browser build pairs the WASM binary with the WebGL runtime from the locked
 Miniquad package, then serves both locally.
 
-Move with WASD or the arrow keys. The Moon Knives orbit automatically and the
-Storm Lantern chains lightning through nearby enemies. Choose upgrades with
-1–3 or the mouse; every level offers one Moon Knife, one Storm Lantern, and one
-Witchcraft upgrade. Pause with Escape and survive as long as possible.
+Move with WASD or the arrow keys. Moon Knives orbit automatically and the Storm
+Lantern chains lightning; the rest of the arsenal unlocks through level-up
+offers. Choose upgrades with 1–3 or the mouse. Pause with Escape.
+
+Survive as long as possible. Night phases deepen the pressure, and periodic
+ritual windows spike spawns toward heavier enemies.
 
 ## Code map
 
@@ -32,9 +34,10 @@ Witchcraft upgrade. Pause with Escape and survive as long as possible.
 - `src/game/render.rs` draws the world without changing simulation state.
 - `src/game/render/ui.rs` owns screen-space HUD and menu presentation.
 
-Read `main.rs` first, then follow `Game::update` through `update_running`. The
-small data types above `Game` define the complete model; rendering is kept in a
-child module so it can inspect the model without making fields public.
+Read `main.rs` first, then follow `Game::update` through `update_running`.
+Weapon stats and projectiles live as ordinary structs on `Game`; shared charge
+motion goes through `ArmedCharge` / `ChargeMotion`. Rendering is a child module
+so it can inspect the model without making fields public.
 
 The loop uses a capped variable timestep. Movement, steering, damping, and
 enemy separation use time-based rates so higher refresh rates improve smoothness

@@ -1,15 +1,20 @@
 //! Screen-space HUD, menus, and upgrade presentation.
 
+use std::f32::consts::PI;
+
 use macroquad::prelude::*;
 
 use super::{draw_text_center, hash_cell};
 use crate::game::{
-    ARCANE_VIOLET, BACKGROUND, BONE, DAMAGE_RED, GEM_GREEN, Game, INK, MOON_GOLD, STORM_CYAN,
-    Upgrade, format_time,
+    ABYSSAL_MINE, AETHER_MAUVE, ARCANE_VIOLET, BACKGROUND, BONE, CINDER_ORANGE, CRESCENT_AUREATE,
+    CombatPulse, DAMAGE_RED, GEM_GREEN, GLOOM_PURPLE, GRAVE_MARROW, Game, INK, LANCE_AZURE,
+    MOON_GOLD, PHANTOM_CERULEAN, PHANTOM_EMBER, PHANTOM_NET_GREEN, RIFT_CYAN, RIFT_VIOLET,
+    SCYTHE_IRON, SOLAR_NOVA, STORM_CYAN, Upgrade, VOID_BLOOM, WRAITH_AMETHYST, format_time,
 };
 
 const PANEL: Color = Color::new(0.075, 0.060, 0.125, 0.94);
 const MUTED: Color = Color::new(0.60, 0.55, 0.70, 1.0);
+const COMBAT_WEAPON_BAR_COUNT: usize = crate::game::COMBAT_WEAPON_BAR_COUNT;
 
 impl Upgrade {
     const fn name(self) -> &'static str {
@@ -20,9 +25,55 @@ impl Upgrade {
             Self::FastStorm => "Quickened Spark",
             Self::ForkedStorm => "Forked Omen",
             Self::PotentStorm => "Thunderheart",
+            Self::GraveMine => "Gravefield",
+            Self::GraveMineReach => "Cinder Reach",
+            Self::GraveMineRage => "Mourning Burst",
+            Self::AstralFlare => "Astral Halo",
+            Self::AstralFlareBloom => "Comet Bloom",
+            Self::AstralFlarePulse => "Solar Pulse",
+            Self::EchoCannon => "Echo Cannon",
+            Self::EchoCannonResonance => "Resonant Cannon",
+            Self::EchoCannonCataclysm => "Cataclysm Cannon",
+            Self::WraithLash => "Wraith Lash",
+            Self::WraithLashReach => "Crescent Lash",
+            Self::WraithLashRend => "Rending Lash",
+            Self::HarrowVolley => "Harrow Volley",
+            Self::HarrowVolleyAim => "Seeking Volleys",
+            Self::HarrowVolleyPierce => "Piercing Volleys",
+            Self::AetherSpear | Self::AetherSpearSplit | Self::AetherSpearRage => "Aether Spear",
+            Self::RiftPulse | Self::RiftPulseAnchor | Self::RiftPulseCascade => "Rift Pulse",
+            Self::SolarNova | Self::SolarNovaBloom | Self::SolarNovaCataclysm => "Solar Nova",
+            Self::CrescentHalo | Self::CrescentHaloSpiral | Self::CrescentHaloCataclysm => {
+                "Crescent Halo"
+            },
+            Self::VoidBloom | Self::VoidBloomReach | Self::VoidBloomCascade => "Void Bloom",
+            Self::AbyssalMine | Self::AbyssalMineReach | Self::AbyssalMineRage => "Abyssal Mines",
+            Self::Starfall | Self::StarfallCascade | Self::StarfallCataclysm => "Starfall",
+            Self::PhantomNet | Self::PhantomNetReach | Self::PhantomNetRage => "Phantom Net",
+            Self::LuminousLance | Self::LuminousLanceFork | Self::LuminousLanceRend => {
+                "Luminous Lance"
+            },
+            Self::TemporalRift | Self::TemporalRiftAnchor | Self::TemporalRiftSurge => {
+                "Temporal Rift"
+            },
+            Self::ScytheCyclone | Self::ScytheCycloneSpiral | Self::ScytheCycloneRavage => {
+                "Scythe Cyclone"
+            },
+            Self::GloomVolley | Self::GloomVolleyCage | Self::GloomVolleyEcho => "Gloom Volley",
+            Self::PulseLance | Self::PulseLanceSurge | Self::PulseLanceCataclysm => "Pulse Lance",
+            Self::ShardStorm | Self::ShardStormCascade | Self::ShardStormCataclysm => "Shard Storm",
+            Self::PrismBolts | Self::PrismBoltsTwin | Self::PrismBoltsRift => "Prism Bolts",
+            Self::InfernoBomb | Self::InfernoBombScatter | Self::InfernoBombCataclysm => {
+                "Inferno Bomb"
+            },
+            Self::GravityWeave | Self::GravityWeaveAnchor | Self::GravityWeaveCollapse => {
+                "Gravity Weave"
+            },
+            Self::SigilNet | Self::SigilNetReach | Self::SigilNetRuin => "Sigil Net",
             Self::Fleet => "Fleetfoot",
             Self::Vitality => "Blood Ward",
             Self::Magnet => "Grave Pull",
+            Self::RuneWard | Self::RuneWardEcho | Self::RuneWardCataclysm => "Rune Ward",
         }
     }
 
@@ -34,9 +85,79 @@ impl Upgrade {
             Self::FastStorm => "28% shorter storm cooldown",
             Self::ForkedStorm => "+2 chains and +40 reach",
             Self::PotentStorm => "+50% storm lantern damage",
+            Self::GraveMine => "Unlock homing graveshard mines",
+            Self::GraveMineReach => "+8 blast radius and +9 homing",
+            Self::GraveMineRage => "Mine damage up, cooldown down",
+            Self::AstralFlare => "Unlock radial pulse around player",
+            Self::AstralFlareBloom => "+12 flare radius and damage",
+            Self::AstralFlarePulse => "Quicker pulse cooldown",
+            Self::SolarNova => "Unlock expanding solar nova rings",
+            Self::SolarNovaBloom => "+1 ring, +14 radius, +11% damage",
+            Self::SolarNovaCataclysm | Self::InfernoBombCataclysm => "+22% damage, faster cadence",
+            Self::EchoCannon => "Unlock spectral cannon pulses",
+            Self::EchoCannonResonance => "+1 shard, +16% damage, +18 speed",
+            Self::EchoCannonCataclysm => "+1 bounce, +22% damage, -18% cooldown",
+            Self::WraithLash => "Unlock chain whip strike",
+            Self::WraithLashReach => "+32 range and +5% damage",
+            Self::WraithLashRend => "+2.6 lash width, +32% damage",
+            Self::HarrowVolley => "Unlock piercing dart volleys",
+            Self::HarrowVolleyAim => "+1 dart and dart speed",
+            Self::HarrowVolleyPierce => "+24% dart damage, faster cool-down",
+            Self::AetherSpear => "Unlock homing astral spears",
+            Self::AetherSpearSplit => "+1 spear, +7% damage, wider spread",
+            Self::AetherSpearRage => "+1 pierce, +16% spear damage, faster",
+            Self::RiftPulse => "Unlock growing pulses from the rift",
+            Self::RiftPulseAnchor => "+20 radius and +12% duration",
+            Self::RiftPulseCascade => "+20% damage, faster pulse cadence",
+            Self::CrescentHalo => "Unlock crescent orbit blades",
+            Self::CrescentHaloSpiral => "+2 blades and wider arc",
+            Self::CrescentHaloCataclysm => "+18% cadence and +6% reach",
+            Self::VoidBloom => "Unlock homing void seeds",
+            Self::VoidBloomReach => "+1 seed and +15% homing",
+            Self::VoidBloomCascade => "+1 seed, +10% duration, faster cooldown",
+            Self::AbyssalMine => "Unlock tracking abyssal minelets",
+            Self::AbyssalMineReach => "+1 mine, +10 blast radius, +14 homing",
+            Self::AbyssalMineRage => "+24% damage, faster mine cadence",
+            Self::Starfall => "Unlock meteor storms from above",
+            Self::StarfallCascade => "+1 meteor, +10% damage, bigger blast",
+            Self::StarfallCataclysm => "+18% damage, faster cadence",
+            Self::PhantomNet => "Unlock orbiting phantom tethers",
+            Self::PhantomNetReach => "+1 thread, wider orbit",
+            Self::PhantomNetRage => "+20% damage, better seeking",
+            Self::LuminousLance => "Unlock homing spears",
+            Self::LuminousLanceFork => "+1 spear, +7.5% damage, +26 range",
+            Self::LuminousLanceRend => "+1 pierce, +16% damage, faster",
+            Self::TemporalRift => "Unlock pulsing temporal wells",
+            Self::TemporalRiftAnchor => "+1 gate, wider and longer wells",
+            Self::TemporalRiftSurge => "+20% damage, faster pulses",
+            Self::ScytheCyclone => "Unlock orbiting scythe blades",
+            Self::ScytheCycloneSpiral => "+1 blade, wider sweep",
+            Self::ScytheCycloneRavage => "+6% cadence, +26% damage",
+            Self::GloomVolley => "Unlock void-touched shards",
+            Self::GloomVolleyCage => "+1 shard, +24 range, +1 pierce",
+            Self::GloomVolleyEcho => "+17% damage, more pierce, faster shards",
+            Self::PulseLance => "Unlock piercing lance strikes",
+            Self::PulseLanceSurge => "+1 chain and wider strike arc",
+            Self::ShardStorm => "Unlock shard storm projectiles",
+            Self::ShardStormCascade => "+1 shard, +40 range, +1 pierce",
+            Self::PulseLanceCataclysm | Self::ShardStormCataclysm => "+24% damage, faster cadence",
+            Self::PrismBolts => "Unlock prism bolts",
+            Self::PrismBoltsTwin => "+1 bolt, +10% homing",
+            Self::PrismBoltsRift => "+20% range and +12% speed",
+            Self::InfernoBomb => "Unlock inferno bombs",
+            Self::InfernoBombScatter => "+1 bomb and broader blast",
+            Self::GravityWeave => "Unlock gravity wells",
+            Self::GravityWeaveAnchor => "+1 well and longer cycle",
+            Self::GravityWeaveCollapse => "+22% pull, +16% radius",
+            Self::SigilNet => "Unlock orbiting sigil threads",
+            Self::SigilNetReach => "+1 thread and wider orbit",
+            Self::SigilNetRuin => "+18% damage, stronger pull",
             Self::Fleet => "+18% movement speed",
             Self::Vitality => "+35 max health and healing",
             Self::Magnet => "+45% pickup reach",
+            Self::RuneWard => "Conjure pulsing ward circles",
+            Self::RuneWardEcho => "+10 radius, +11% damage, +8 pull",
+            Self::RuneWardCataclysm => "+22% cadence, +0.12s pulse duration",
         }
     }
 
@@ -44,6 +165,60 @@ impl Upgrade {
         match self {
             Self::ExtraKnife | Self::SharpenedMoon | Self::WiderOrbit => MOON_GOLD,
             Self::FastStorm | Self::ForkedStorm | Self::PotentStorm => STORM_CYAN,
+            Self::GraveMine
+            | Self::GraveMineReach
+            | Self::GraveMineRage
+            | Self::AstralFlare
+            | Self::AstralFlareBloom
+            | Self::AstralFlarePulse
+            | Self::Starfall
+            | Self::StarfallCascade
+            | Self::StarfallCataclysm => CINDER_ORANGE,
+            Self::SolarNova | Self::SolarNovaBloom | Self::SolarNovaCataclysm => SOLAR_NOVA,
+            Self::WraithLash | Self::WraithLashReach | Self::WraithLashRend => WRAITH_AMETHYST,
+            Self::HarrowVolley | Self::HarrowVolleyAim | Self::HarrowVolleyPierce => ARCANE_VIOLET,
+            Self::AetherSpear
+            | Self::AetherSpearSplit
+            | Self::AetherSpearRage
+            | Self::LuminousLance
+            | Self::LuminousLanceFork
+            | Self::LuminousLanceRend => AETHER_MAUVE,
+            Self::RiftPulse | Self::RiftPulseAnchor | Self::RiftPulseCascade => RIFT_VIOLET,
+            Self::CrescentHalo | Self::CrescentHaloSpiral | Self::CrescentHaloCataclysm => {
+                CRESCENT_AUREATE
+            },
+            Self::VoidBloom | Self::VoidBloomReach | Self::VoidBloomCascade => VOID_BLOOM,
+            Self::AbyssalMine | Self::AbyssalMineReach | Self::AbyssalMineRage => ABYSSAL_MINE,
+            Self::PhantomNet
+            | Self::PhantomNetReach
+            | Self::PhantomNetRage
+            | Self::SigilNet
+            | Self::SigilNetReach
+            | Self::SigilNetRuin => PHANTOM_NET_GREEN,
+            Self::TemporalRift
+            | Self::TemporalRiftAnchor
+            | Self::TemporalRiftSurge
+            | Self::GravityWeave
+            | Self::GravityWeaveAnchor
+            | Self::GravityWeaveCollapse => RIFT_CYAN,
+            Self::ScytheCyclone | Self::ScytheCycloneSpiral | Self::ScytheCycloneRavage => {
+                SCYTHE_IRON
+            },
+            Self::GloomVolley
+            | Self::GloomVolleyCage
+            | Self::GloomVolleyEcho
+            | Self::ShardStorm
+            | Self::ShardStormCascade
+            | Self::ShardStormCataclysm => GLOOM_PURPLE,
+            Self::PulseLance | Self::PulseLanceSurge | Self::PulseLanceCataclysm => LANCE_AZURE,
+            Self::PrismBolts | Self::PrismBoltsTwin | Self::PrismBoltsRift => PHANTOM_CERULEAN,
+            Self::InfernoBomb | Self::InfernoBombScatter | Self::InfernoBombCataclysm => {
+                CINDER_ORANGE
+            },
+            Self::EchoCannon | Self::EchoCannonResonance | Self::EchoCannonCataclysm => {
+                PHANTOM_CERULEAN
+            },
+            Self::RuneWard | Self::RuneWardEcho | Self::RuneWardCataclysm => PHANTOM_EMBER,
             Self::Fleet | Self::Vitality | Self::Magnet => GEM_GREEN,
         }
     }
@@ -52,9 +227,75 @@ impl Upgrade {
         match self {
             Self::ExtraKnife | Self::SharpenedMoon | Self::WiderOrbit => "MOON KNIVES",
             Self::FastStorm | Self::ForkedStorm | Self::PotentStorm => "STORM LANTERN",
+            Self::GraveMine | Self::GraveMineReach | Self::GraveMineRage => "GRAVE MINEFIELD",
+            Self::AstralFlare | Self::AstralFlareBloom | Self::AstralFlarePulse => "ASTRAL FLARE",
+            Self::SolarNova | Self::SolarNovaBloom | Self::SolarNovaCataclysm => "SOLAR NOVA",
+            Self::EchoCannon | Self::EchoCannonResonance | Self::EchoCannonCataclysm => {
+                "ECHO CANNON"
+            },
+            Self::WraithLash | Self::WraithLashReach | Self::WraithLashRend => "WRAITH LASH",
+            Self::HarrowVolley | Self::HarrowVolleyAim | Self::HarrowVolleyPierce => {
+                "HARROW VOLLEY"
+            },
+            Self::AetherSpear | Self::AetherSpearSplit | Self::AetherSpearRage => "AETHER SPEAR",
+            Self::RiftPulse | Self::RiftPulseAnchor | Self::RiftPulseCascade => "RIFT PULSE",
+            Self::CrescentHalo | Self::CrescentHaloSpiral | Self::CrescentHaloCataclysm => {
+                "CRESCENT HALO"
+            },
+            Self::VoidBloom | Self::VoidBloomReach | Self::VoidBloomCascade => "VOID BLOOM",
+            Self::AbyssalMine | Self::AbyssalMineReach | Self::AbyssalMineRage => "ABYSSAL MINES",
+            Self::Starfall | Self::StarfallCascade | Self::StarfallCataclysm => "STARFALL",
+            Self::PhantomNet | Self::PhantomNetReach | Self::PhantomNetRage => "PHANTOM NET",
+            Self::LuminousLance | Self::LuminousLanceFork | Self::LuminousLanceRend => {
+                "LUMINOUS LANCE"
+            },
+            Self::TemporalRift | Self::TemporalRiftAnchor | Self::TemporalRiftSurge => {
+                "TEMPORAL RIFT"
+            },
+            Self::ScytheCyclone | Self::ScytheCycloneSpiral | Self::ScytheCycloneRavage => {
+                "SCYTHE CYCLONE"
+            },
+            Self::GloomVolley | Self::GloomVolleyCage | Self::GloomVolleyEcho => "GLOOM VOLLEY",
+            Self::PulseLance | Self::PulseLanceSurge | Self::PulseLanceCataclysm => "PULSE LANCE",
+            Self::ShardStorm | Self::ShardStormCascade | Self::ShardStormCataclysm => "SHARD STORM",
+            Self::PrismBolts | Self::PrismBoltsTwin | Self::PrismBoltsRift => "PRISM BOLTS",
+            Self::InfernoBomb | Self::InfernoBombScatter | Self::InfernoBombCataclysm => {
+                "INFERNO BOMB"
+            },
+            Self::GravityWeave | Self::GravityWeaveAnchor | Self::GravityWeaveCollapse => {
+                "GRAVITY WEAVE"
+            },
+            Self::SigilNet | Self::SigilNetReach | Self::SigilNetRuin => "SIGIL NET",
+            Self::RuneWard | Self::RuneWardEcho | Self::RuneWardCataclysm => "RUNE WARD",
             Self::Fleet | Self::Vitality | Self::Magnet => "WITCHCRAFT",
         }
     }
+}
+
+#[derive(Copy, Clone)]
+struct WeaponBadgeInfo {
+    name: &'static str,
+    level: u32,
+    color: Color,
+    charge: f32,
+    unlocked: bool,
+}
+
+const WEAPON_BADGE_TARGET_COLUMNS_COMPACT: usize = 3;
+const WEAPON_BADGE_TARGET_COLUMNS_DESKTOP: usize = 4;
+const WEAPON_BADGE_MIN_WIDTH: f32 = 116.0;
+const WEAPON_BADGE_MIN_HEIGHT: f32 = 18.0;
+const WEAPON_BADGE_MAX_HEIGHT: f32 = 38.0;
+const WEAPON_BADGE_MAX_ROWS: usize = 3;
+const WEAPON_BADGE_VISIBLE_LIMIT: usize = 12;
+
+struct RunHeaderState {
+    chapter: &'static str,
+    omen: &'static str,
+    mood: Color,
+    menace: f32,
+    pressures: CombatPulse,
+    vector: &'static str,
 }
 
 impl Game {
@@ -66,7 +307,31 @@ impl Game {
     fn draw_run_header(&self) {
         let width = screen_width();
         let compact = width < 720.0;
-        let hud_text_size = if compact { 16.0 } else { 20.0 };
+        let (chapter, omen, mood, menace) = self.night_state();
+        let vector = self.flavor_vector();
+        let pressures = self.combat_pressures();
+        let ritual_warning = self.ritual_warning();
+        let ritual_active = self.is_ritual_window();
+        let ritual_time = if ritual_active {
+            self.ritual_time_remaining()
+        } else {
+            self.ritual_window_countdown()
+        };
+        let header_state = RunHeaderState {
+            chapter,
+            omen,
+            mood,
+            menace,
+            pressures,
+            vector,
+        };
+
+        self.draw_run_header_background(width);
+        self.draw_run_header_texts(width, compact, header_state);
+        draw_run_ritual_status(width, compact, ritual_warning, ritual_active, ritual_time);
+    }
+
+    fn draw_run_header_background(&self, width: f32) {
         let experience_ratio = self.player.experience as f32 / self.player.next_level.max(1) as f32;
         draw_panel(Rect::new(14.0, 14.0, width - 28.0, 47.0));
         draw_bar(
@@ -93,6 +358,16 @@ impl Game {
                 ),
             );
         }
+    }
+
+    fn draw_run_header_texts(&self, width: f32, compact: bool, status: RunHeaderState) {
+        let chapter = status.chapter;
+        let omen = status.omen;
+        let mood = status.mood;
+        let menace = status.menace;
+        let pressures = status.pressures;
+        let vector = status.vector;
+        let hud_text_size = if compact { 16.0 } else { 20.0 };
         draw_text(
             format!("LEVEL {:02}", self.player.level),
             22.0,
@@ -100,6 +375,7 @@ impl Game {
             hud_text_size,
             BONE,
         );
+        draw_text(chapter, 22.0, 69.0, if compact { 12.0 } else { 15.0 }, mood);
         draw_text_center(
             &format_time(self.elapsed),
             width * 0.5,
@@ -118,29 +394,52 @@ impl Game {
             hud_text_size,
             BONE,
         );
+        draw_text(
+            omen,
+            width - 24.0,
+            if compact { 70.0 } else { 73.0 },
+            if compact { 10.0 } else { 13.0 },
+            MUTED,
+        );
+        draw_text(
+            format!("PHASE {:.0}", (menace * 100.0).round()),
+            width * 0.5 - 34.0,
+            34.0,
+            if compact { 12.0 } else { 14.0 },
+            Color::new(mood.r, mood.g, mood.b, 0.95),
+        );
+        draw_text_center(
+            vector,
+            width * 0.5,
+            67.0,
+            if compact { 10.0 } else { 12.0 },
+            Color::new(mood.r * 0.9, mood.g * 0.9, mood.b * 0.9, 0.86),
+        );
+        draw_combat_pressure_ribbon(width, compact, pressures);
     }
 
     fn draw_loadout(&self) {
         let width = screen_width();
-        let height = screen_height();
         let compact = width < 720.0;
-        let (health, weapon_y, weapon_width, moon_x, storm_x) = if compact {
-            let weapon_width = (width - 42.0) * 0.5;
-            (
-                Rect::new(12.0, height - 72.0, width - 24.0, 58.0),
-                height - 139.0,
-                weapon_width,
-                12.0,
-                24.0 + weapon_width,
-            )
+        let health = self.draw_health_panel(width, compact);
+        let weapon_bars = self.weapon_bars();
+        // Prefer unlocked weapons, then fill remaining slots with locked previews.
+        let mut visible = Vec::with_capacity(WEAPON_BADGE_VISIBLE_LIMIT);
+        for unlocked_only in [true, false] {
+            for &badge in &weapon_bars {
+                if badge.unlocked == unlocked_only && visible.len() < WEAPON_BADGE_VISIBLE_LIMIT {
+                    visible.push(badge);
+                }
+            }
+        }
+        draw_weapon_loadout(width, compact, health, &visible);
+    }
+
+    fn draw_health_panel(&self, width: f32, compact: bool) -> Rect {
+        let health = if compact {
+            Rect::new(12.0, screen_height() - 72.0, width - 24.0, 58.0)
         } else {
-            (
-                Rect::new(16.0, height - 73.0, 252.0, 57.0),
-                height - 73.0,
-                140.0,
-                width - 306.0,
-                width - 156.0,
-            )
+            Rect::new(16.0, screen_height() - 73.0, 252.0, 57.0)
         };
         draw_panel(health);
         draw_text("VITALITY", health.x + 9.0, health.y + 22.0, 14.0, MUTED);
@@ -161,30 +460,250 @@ impl Game {
             14.0,
             BONE,
         );
+        health
+    }
 
-        let storm_charge = (1.0 - self.storm_timer.max(0.0) / self.storm.cooldown).clamp(0.0, 1.0);
-        draw_weapon_badge(
-            moon_x,
-            weapon_y,
-            weapon_width,
-            "MOON KNIVES",
-            self.moon.level,
-            MOON_GOLD,
-            1.0,
-        );
-        draw_weapon_badge(
-            storm_x,
-            weapon_y,
-            weapon_width,
-            "STORM LANTERN",
-            self.storm.level,
-            STORM_CYAN,
-            storm_charge,
-        );
+    #[allow(
+        clippy::too_many_lines,
+        reason = "loadout table is one badge per combat family"
+    )]
+    fn weapon_bars(&self) -> [WeaponBadgeInfo; COMBAT_WEAPON_BAR_COUNT] {
+        let charge = |unlocked: bool, timer: f32, cooldown: f32| -> f32 {
+            if !unlocked || cooldown <= 0.0 {
+                0.0
+            } else {
+                (1.0 - (timer.max(0.0) / cooldown)).clamp(0.0, 1.0)
+            }
+        };
+        let badge = |name: &'static str,
+                     level: u32,
+                     color: Color,
+                     unlocked: bool,
+                     timer: f32,
+                     cooldown: f32| {
+            WeaponBadgeInfo {
+                name,
+                level,
+                color,
+                charge: charge(unlocked, timer, cooldown),
+                unlocked,
+            }
+        };
+
+        [
+            WeaponBadgeInfo {
+                name: "MOON KNIVES",
+                level: self.moon.level,
+                color: MOON_GOLD,
+                charge: 1.0,
+                unlocked: true,
+            },
+            badge(
+                "STORM LANTERN",
+                self.storm.level,
+                STORM_CYAN,
+                true,
+                self.storm_timer,
+                self.storm.cooldown,
+            ),
+            badge(
+                "GRAVE MINEFIELD",
+                self.grave_mines.level,
+                GRAVE_MARROW,
+                self.grave_mines.unlocked(),
+                self.grave_mines.timer,
+                self.grave_mines.cooldown,
+            ),
+            badge(
+                "ASTRAL FLARE",
+                self.astral_flare.level,
+                CINDER_ORANGE,
+                self.astral_flare.unlocked(),
+                self.astral_flare.timer,
+                self.astral_flare.cooldown,
+            ),
+            badge(
+                "WRAITH LASH",
+                self.wraith_lash.level,
+                WRAITH_AMETHYST,
+                self.wraith_lash.unlocked(),
+                self.wraith_lash.timer,
+                self.wraith_lash.cooldown,
+            ),
+            badge(
+                "HARROW VOLLEY",
+                self.harrow_volley.level,
+                ARCANE_VIOLET,
+                self.harrow_volley.unlocked(),
+                self.harrow_volley.timer,
+                self.harrow_volley.cooldown,
+            ),
+            badge(
+                "AETHER SPEAR",
+                self.aether_spears.level,
+                AETHER_MAUVE,
+                self.aether_spears.unlocked(),
+                self.aether_spears.timer,
+                self.aether_spears.cooldown,
+            ),
+            badge(
+                "RIFT PULSE",
+                self.rift_pulse.level,
+                RIFT_VIOLET,
+                self.rift_pulse.unlocked(),
+                self.rift_pulse.timer,
+                self.rift_pulse.cooldown,
+            ),
+            badge(
+                "ECHO CANNON",
+                self.echo_cannon.level,
+                PHANTOM_CERULEAN,
+                self.echo_cannon.unlocked(),
+                self.echo_cannon.timer,
+                self.echo_cannon.cooldown,
+            ),
+            badge(
+                "RUNE WARD",
+                self.rune_wards.level,
+                PHANTOM_EMBER,
+                self.rune_wards.unlocked(),
+                self.rune_wards.timer,
+                self.rune_wards.cooldown,
+            ),
+            badge(
+                "CRESCENT HALO",
+                self.crescent_halo.level,
+                CRESCENT_AUREATE,
+                self.crescent_halo.unlocked(),
+                self.crescent_halo.timer,
+                self.crescent_halo.cooldown,
+            ),
+            badge(
+                "VOID BLOOM",
+                self.void_bloom.level,
+                VOID_BLOOM,
+                self.void_bloom.unlocked(),
+                self.void_bloom.timer,
+                self.void_bloom.cooldown,
+            ),
+            badge(
+                "SOLAR NOVA",
+                self.solar_nova.level,
+                SOLAR_NOVA,
+                self.solar_nova.unlocked(),
+                self.solar_nova.timer,
+                self.solar_nova.cooldown,
+            ),
+            badge(
+                "ABYSSAL MINES",
+                self.abyssal_mines.level,
+                ABYSSAL_MINE,
+                self.abyssal_mines.unlocked(),
+                self.abyssal_mines.timer,
+                self.abyssal_mines.cooldown,
+            ),
+            badge(
+                "STARFALL",
+                self.starfall.level,
+                CINDER_ORANGE,
+                self.starfall.unlocked(),
+                self.starfall.timer,
+                self.starfall.cooldown,
+            ),
+            badge(
+                "PHANTOM NET",
+                self.phantom_net.level,
+                PHANTOM_NET_GREEN,
+                self.phantom_net.unlocked(),
+                self.phantom_net.timer,
+                self.phantom_net.cooldown,
+            ),
+            badge(
+                "LUMINOUS LANCE",
+                self.luminous_lance.level,
+                AETHER_MAUVE,
+                self.luminous_lance.unlocked(),
+                self.luminous_lance.timer,
+                self.luminous_lance.cooldown,
+            ),
+            badge(
+                "TEMPORAL RIFT",
+                self.temporal_rift.level,
+                RIFT_CYAN,
+                self.temporal_rift.unlocked(),
+                self.temporal_rift.timer,
+                self.temporal_rift.cooldown,
+            ),
+            badge(
+                "SCYTHE CYCLONE",
+                self.scythe_cyclone.level,
+                SCYTHE_IRON,
+                self.scythe_cyclone.unlocked(),
+                self.scythe_cyclone.timer,
+                self.scythe_cyclone.cooldown,
+            ),
+            badge(
+                "GLOOM VOLLEY",
+                self.gloom_volley.level,
+                GLOOM_PURPLE,
+                self.gloom_volley.unlocked(),
+                self.gloom_volley.timer,
+                self.gloom_volley.cooldown,
+            ),
+            badge(
+                "PULSE LANCE",
+                self.pulse_lance.level,
+                LANCE_AZURE,
+                self.pulse_lance.unlocked(),
+                self.pulse_lance.timer,
+                self.pulse_lance.cooldown,
+            ),
+            badge(
+                "SHARD STORM",
+                self.shard_storm.level,
+                GLOOM_PURPLE,
+                self.shard_storm.unlocked(),
+                self.shard_storm.timer,
+                self.shard_storm.cooldown,
+            ),
+            badge(
+                "PRISM BOLTS",
+                self.prism_bolts.level,
+                PHANTOM_CERULEAN,
+                self.prism_bolts.unlocked(),
+                self.prism_bolts.timer,
+                self.prism_bolts.cooldown,
+            ),
+            badge(
+                "INFERNO BOMB",
+                self.inferno_bombs.level,
+                CINDER_ORANGE,
+                self.inferno_bombs.unlocked(),
+                self.inferno_bombs.timer,
+                self.inferno_bombs.cooldown,
+            ),
+            badge(
+                "GRAVITY WEAVE",
+                self.gravity_weave.level,
+                RIFT_CYAN,
+                self.gravity_weave.unlocked(),
+                self.gravity_weave.timer,
+                self.gravity_weave.cooldown,
+            ),
+            badge(
+                "SIGIL NET",
+                self.sigil_net.level,
+                PHANTOM_NET_GREEN,
+                self.sigil_net.unlocked(),
+                self.sigil_net.timer,
+                self.sigil_net.cooldown,
+            ),
+        ]
     }
 
     pub(super) fn draw_title(&self) {
         let center = vec2(screen_width() * 0.5, screen_height() * 0.5);
+        let (chapter, ..) = self.night_state();
         for index in 0..90 {
             let hash = hash_cell(index, index * 19);
             let position = vec2(
@@ -217,7 +736,7 @@ impl Game {
         draw_circle(center.x + 24.0, center.y - 145.0, 59.0, BACKGROUND);
         draw_text_center("NIGHTFALL", center.x, center.y + 15.0, 72.0, BONE);
         draw_text_center(
-            "A tiny survival spellbook",
+            &format!("{} — {}", chapter, self.flavor_vector()),
             center.x,
             center.y + 50.0,
             23.0,
@@ -357,6 +876,13 @@ impl Game {
             23.0,
             MOON_GOLD,
         );
+        draw_text_center(
+            self.flavor_vector(),
+            center_x,
+            center_y - 24.0,
+            17.0,
+            Color::new(0.85, 0.83, 0.96, 0.95),
+        );
         let result = if compact {
             format!("{} banished  ·  level {}", self.kills, self.player.level)
         } else {
@@ -493,6 +1019,10 @@ fn upgrade_rect(index: usize) -> Rect {
     )
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "icon branch map is compact and readable as a switch map"
+)]
 fn draw_upgrade_icon(upgrade: Upgrade, center: Vec2) {
     let color = upgrade.color();
     draw_circle(
@@ -516,18 +1046,7 @@ fn draw_upgrade_icon(upgrade: Upgrade, center: Vec2) {
             );
         },
         Upgrade::FastStorm | Upgrade::ForkedStorm | Upgrade::PotentStorm => {
-            draw_triangle(
-                center + vec2(2.0, -20.0),
-                center + vec2(-11.0, 2.0),
-                center + vec2(1.0, 1.0),
-                color,
-            );
-            draw_triangle(
-                center + vec2(-1.0, -1.0),
-                center + vec2(11.0, -2.0),
-                center + vec2(-5.0, 20.0),
-                BONE,
-            );
+            icon_bolt(center, color, BONE);
         },
         Upgrade::Fleet => {
             for offset in [-8.0, 0.0, 8.0] {
@@ -562,6 +1081,401 @@ fn draw_upgrade_icon(upgrade: Upgrade, center: Vec2) {
             draw_circle(center.x, center.y, 7.0, PANEL);
             draw_circle(center.x, center.y, 3.0, BONE);
         },
+        Upgrade::WraithLash | Upgrade::WraithLashReach | Upgrade::WraithLashRend => {
+            icon_lash(center, color);
+        },
+        Upgrade::HarrowVolley | Upgrade::HarrowVolleyAim | Upgrade::HarrowVolleyPierce => {
+            draw_poly(center.x, center.y + 1.0, 3, 9.0, PI * 0.32, MOON_GOLD);
+            draw_poly(center.x, center.y - 1.0, 3, 6.0, PI * -0.22, color);
+            draw_circle_lines(center.x - 10.0, center.y, 4.0, 1.5, color);
+            draw_circle_lines(center.x + 10.0, center.y, 4.0, 1.5, color);
+        },
+        // Mine-like weapons
+        Upgrade::GraveMine
+        | Upgrade::GraveMineReach
+        | Upgrade::GraveMineRage
+        | Upgrade::AbyssalMine
+        | Upgrade::AbyssalMineReach
+        | Upgrade::AbyssalMineRage => {
+            icon_mine(center, color);
+        },
+        // Orbiting nets / threads
+        Upgrade::PhantomNet
+        | Upgrade::PhantomNetReach
+        | Upgrade::PhantomNetRage
+        | Upgrade::SigilNet
+        | Upgrade::SigilNetReach
+        | Upgrade::SigilNetRuin => {
+            icon_orbit_net(center, color);
+        },
+        // Expanding rings / wells
+        Upgrade::AstralFlare
+        | Upgrade::AstralFlareBloom
+        | Upgrade::AstralFlarePulse
+        | Upgrade::SolarNova
+        | Upgrade::SolarNovaBloom
+        | Upgrade::SolarNovaCataclysm
+        | Upgrade::EchoCannon
+        | Upgrade::EchoCannonResonance
+        | Upgrade::EchoCannonCataclysm
+        | Upgrade::RiftPulse
+        | Upgrade::RiftPulseAnchor
+        | Upgrade::RiftPulseCascade
+        | Upgrade::RuneWard
+        | Upgrade::RuneWardEcho
+        | Upgrade::RuneWardCataclysm
+        | Upgrade::TemporalRift
+        | Upgrade::TemporalRiftAnchor
+        | Upgrade::TemporalRiftSurge
+        | Upgrade::GravityWeave
+        | Upgrade::GravityWeaveAnchor
+        | Upgrade::GravityWeaveCollapse
+        | Upgrade::Starfall
+        | Upgrade::StarfallCascade
+        | Upgrade::StarfallCataclysm
+        | Upgrade::InfernoBomb
+        | Upgrade::InfernoBombScatter
+        | Upgrade::InfernoBombCataclysm
+        | Upgrade::VoidBloom
+        | Upgrade::VoidBloomReach
+        | Upgrade::VoidBloomCascade => {
+            icon_pulse(center, color);
+        },
+        // Spears / lances / bolts
+        Upgrade::AetherSpear
+        | Upgrade::AetherSpearSplit
+        | Upgrade::AetherSpearRage
+        | Upgrade::LuminousLance
+        | Upgrade::LuminousLanceFork
+        | Upgrade::LuminousLanceRend
+        | Upgrade::PulseLance
+        | Upgrade::PulseLanceSurge
+        | Upgrade::PulseLanceCataclysm
+        | Upgrade::PrismBolts
+        | Upgrade::PrismBoltsTwin
+        | Upgrade::PrismBoltsRift => {
+            icon_spear(center, color);
+        },
+        // Spinning blades
+        Upgrade::CrescentHalo
+        | Upgrade::CrescentHaloSpiral
+        | Upgrade::CrescentHaloCataclysm
+        | Upgrade::ScytheCyclone
+        | Upgrade::ScytheCycloneSpiral
+        | Upgrade::ScytheCycloneRavage => {
+            icon_blades(center, color);
+        },
+        // Shard volleys
+        Upgrade::GloomVolley
+        | Upgrade::GloomVolleyCage
+        | Upgrade::GloomVolleyEcho
+        | Upgrade::ShardStorm
+        | Upgrade::ShardStormCascade
+        | Upgrade::ShardStormCataclysm => {
+            icon_shards(center, color);
+        },
+    }
+}
+
+fn icon_bolt(center: Vec2, color: Color, accent: Color) {
+    draw_triangle(
+        center + vec2(2.0, -20.0),
+        center + vec2(-11.0, 2.0),
+        center + vec2(1.0, 1.0),
+        color,
+    );
+    draw_triangle(
+        center + vec2(-1.0, -1.0),
+        center + vec2(11.0, -2.0),
+        center + vec2(-5.0, 20.0),
+        accent,
+    );
+}
+
+fn icon_lash(center: Vec2, color: Color) {
+    draw_line(
+        center.x - 17.0,
+        center.y + 10.0,
+        center.x - 2.0,
+        center.y - 12.0,
+        2.5,
+        color,
+    );
+    draw_line(
+        center.x - 2.0,
+        center.y - 12.0,
+        center.x + 11.0,
+        center.y + 12.0,
+        2.5,
+        color,
+    );
+    draw_circle(center.x - 7.0, center.y - 2.0, 4.0, color);
+    draw_line(
+        center.x - 2.0,
+        center.y + 12.0,
+        center.x + 17.0,
+        center.y,
+        2.5,
+        color,
+    );
+    draw_circle(center.x + 6.0, center.y + 1.0, 3.0, PANEL);
+}
+
+fn icon_mine(center: Vec2, color: Color) {
+    draw_circle_lines(center.x, center.y, 16.0, 3.0, color);
+    draw_circle(
+        center.x,
+        center.y + 3.0,
+        10.0,
+        Color::new(color.r * 0.25, color.g * 0.25, color.b * 0.25, 0.9),
+    );
+    for offset in [-8.0, -2.0, 4.0] {
+        draw_circle(center.x + offset, center.y - 1.0, 3.0, color);
+    }
+}
+
+fn icon_orbit_net(center: Vec2, color: Color) {
+    draw_circle_lines(
+        center.x,
+        center.y,
+        16.0,
+        1.8,
+        Color::new(color.r, color.g, color.b, 0.85),
+    );
+    for index in 0..5u8 {
+        let angle = index as f32 * PI * 0.4;
+        draw_circle(
+            center.x + angle.cos() * 8.0,
+            center.y + angle.sin() * 8.0,
+            2.3,
+            color,
+        );
+    }
+    draw_line(
+        center.x - 8.0,
+        center.y,
+        center.x + 8.0,
+        center.y,
+        1.4,
+        color,
+    );
+}
+
+fn icon_pulse(center: Vec2, color: Color) {
+    draw_circle(
+        center.x,
+        center.y,
+        15.0,
+        Color::new(color.r, color.g, color.b, 0.22),
+    );
+    draw_circle_lines(
+        center.x,
+        center.y,
+        16.0,
+        2.0,
+        Color::new(color.r, color.g, color.b, 0.9),
+    );
+    for ring in 0..3u8 {
+        let radius = 6.0 + ring as f32 * 4.0;
+        draw_circle_lines(
+            center.x,
+            center.y,
+            radius,
+            1.1,
+            Color::new(1.0, 1.0, 1.0, (0.28 - ring as f32 * 0.07).max(0.05)),
+        );
+    }
+}
+
+fn icon_spear(center: Vec2, color: Color) {
+    draw_line(
+        center.x - 14.0,
+        center.y,
+        center.x + 14.0,
+        center.y,
+        2.4,
+        Color::new(color.r, color.g, color.b, 0.2),
+    );
+    draw_line(
+        center.x - 12.0,
+        center.y - 3.0,
+        center.x + 12.0,
+        center.y - 3.0,
+        2.0,
+        color,
+    );
+    draw_circle(
+        center.x + 6.0,
+        center.y - 1.0,
+        3.0,
+        Color::new(1.0, 1.0, 1.0, 0.55),
+    );
+    draw_circle_lines(
+        center.x,
+        center.y,
+        15.0,
+        1.4,
+        Color::new(color.r, color.g, color.b, 0.55),
+    );
+}
+
+fn icon_blades(center: Vec2, color: Color) {
+    for index in 0..4u8 {
+        let angle = index as f32 * PI * 0.5;
+        draw_line(
+            center.x,
+            center.y + 2.0,
+            center.x + angle.cos() * 14.0,
+            center.y + angle.sin() * 11.0,
+            1.5,
+            color,
+        );
+    }
+    draw_circle(
+        center.x,
+        center.y + 2.0,
+        7.0,
+        Color::new(color.r, color.g, color.b, 0.35),
+    );
+}
+
+fn icon_shards(center: Vec2, color: Color) {
+    for shard in 0..4u8 {
+        let angle = shard as f32 * PI * 0.5;
+        draw_line(
+            center.x,
+            center.y,
+            center.x + angle.cos() * 12.0,
+            center.y + angle.sin() * 12.0,
+            1.5,
+            color,
+        );
+    }
+    draw_circle_lines(
+        center.x,
+        center.y,
+        13.0,
+        1.6,
+        Color::new(color.r, color.g, color.b, 0.82),
+    );
+}
+
+fn draw_run_ritual_status(
+    width: f32,
+    compact: bool,
+    ritual_warning: f32,
+    ritual_active: bool,
+    ritual_time: f32,
+) {
+    if ritual_warning > 0.0 || ritual_active {
+        let status = if ritual_active {
+            format!("RITUAL · {:>3.0}s", ritual_time.ceil())
+        } else {
+            format!("RITUAL IN {:>3.0}s", ritual_time.ceil())
+        };
+        let color = if ritual_active {
+            Color::new(1.0, 0.35, 0.35, 0.95)
+        } else {
+            Color::new(DAMAGE_RED.r, DAMAGE_RED.g, DAMAGE_RED.b, 0.7)
+        };
+        draw_text(
+            &status,
+            width * 0.5 + 72.0,
+            34.0,
+            if compact { 12.0 } else { 14.0 },
+            color,
+        );
+    }
+}
+
+fn draw_combat_pressure_ribbon(width: f32, compact: bool, pressures: CombatPulse) {
+    let pressure_row_y = if compact { 78.0 } else { 81.0 };
+    let bar_height = if compact { 4.0 } else { 5.0 };
+    let gutter = if compact { 8.0 } else { 10.0 };
+    let metrics = [
+        ("W", pressures.wave, MOON_GOLD),
+        ("B", pressures.beat, STORM_CYAN),
+        ("T", pressures.tempo, WRAITH_AMETHYST),
+        ("C", pressures.cluster, CINDER_ORANGE),
+        ("E", pressures.enrage, DAMAGE_RED),
+        ("P", pressures.time_pulse, ARCANE_VIOLET),
+    ];
+    let track_width = width - 44.0;
+    let lane_width = track_width / metrics.len() as f32;
+    for (index, (label, value, color)) in metrics.iter().enumerate() {
+        let x = 22.0 + index as f32 * lane_width;
+        draw_text(
+            label,
+            x,
+            pressure_row_y,
+            if compact { 8.0 } else { 10.0 },
+            Color::new(color.r, color.g, color.b, 0.74),
+        );
+        draw_bar(
+            x,
+            pressure_row_y + 7.0,
+            lane_width - gutter,
+            bar_height,
+            *value,
+            *color,
+            Color::new(0.0, 0.0, 0.0, 0.42),
+        );
+    }
+}
+
+fn draw_weapon_loadout(width: f32, compact: bool, health: Rect, weapon_bars: &[WeaponBadgeInfo]) {
+    if weapon_bars.is_empty() {
+        return;
+    }
+
+    let visible_limit = weapon_bars.len().min(WEAPON_BADGE_VISIBLE_LIMIT);
+    let target_columns = if compact {
+        WEAPON_BADGE_TARGET_COLUMNS_COMPACT
+    } else {
+        WEAPON_BADGE_TARGET_COLUMNS_DESKTOP
+    };
+
+    let gap = if compact { 8.0 } else { 10.0 };
+    let loadout_left = if compact {
+        12.0
+    } else {
+        health.x + health.w + 10.0
+    };
+    let loadout_width = if compact {
+        width - 24.0
+    } else {
+        (width - loadout_left - 14.0).max(250.0)
+    };
+    let max_columns_by_width = ((loadout_width + gap) / (WEAPON_BADGE_MIN_WIDTH + gap))
+        .floor()
+        .max(1.0) as usize;
+    let mut columns = max_columns_by_width.min(target_columns).min(visible_limit);
+    if columns == 0 {
+        columns = 1;
+    }
+    let rows_needed_for_max_height = visible_limit.div_ceil(columns);
+    if rows_needed_for_max_height > WEAPON_BADGE_MAX_ROWS {
+        let required_columns = visible_limit.div_ceil(WEAPON_BADGE_MAX_ROWS);
+        columns = required_columns
+            .min(max_columns_by_width)
+            .min(visible_limit)
+            .max(1);
+    }
+    let visible_count = visible_limit.min(columns * WEAPON_BADGE_MAX_ROWS);
+    let rows = visible_count.div_ceil(columns);
+    let weapon_width = (loadout_width - gap * (columns as f32 - 1.0)) / columns as f32;
+    let max_total_height = (health.y - 10.0).max(0.0);
+    let weapon_height = ((max_total_height - gap * (rows as f32 - 1.0)) / rows as f32)
+        .clamp(WEAPON_BADGE_MIN_HEIGHT, WEAPON_BADGE_MAX_HEIGHT);
+    let total_height = rows as f32 * weapon_height + gap * (rows as f32 - 1.0);
+    let weapon_y = (health.y - total_height - 6.0).max(6.0);
+
+    for (index, &badge) in weapon_bars[..visible_count].iter().enumerate() {
+        let column = index % columns;
+        let row = index / columns;
+        let x = loadout_left + (column as f32 * (weapon_width + gap));
+        let y = weapon_y + (row as f32 * (weapon_height + gap));
+        draw_weapon_badge(Rect::new(x, y, weapon_width, weapon_height), badge);
     }
 }
 
@@ -606,26 +1520,53 @@ fn draw_bar(x: f32, y: f32, width: f32, height: f32, ratio: f32, fill: Color, ba
     draw_rectangle_lines(x, y, width, height, 1.5, Color::new(0.9, 0.84, 1.0, 0.35));
 }
 
-fn draw_weapon_badge(
-    x: f32,
-    y: f32,
-    width: f32,
-    name: &str,
-    level: u32,
-    color: Color,
-    charge: f32,
-) {
-    draw_panel(Rect::new(x, y, width, 57.0));
-    draw_rectangle(x, y, 4.0, 57.0, color);
-    draw_text(name, x + 11.0, y + 20.0, 13.0, BONE);
-    draw_text(format!("LV {level}"), x + 11.0, y + 37.0, 12.0, color);
-    draw_bar(
-        x + 9.0,
-        y + 44.0,
-        width - 18.0,
-        7.0,
-        charge,
+fn draw_weapon_badge(rect: Rect, badge: WeaponBadgeInfo) {
+    let WeaponBadgeInfo {
+        name,
+        level,
         color,
+        charge,
+        unlocked,
+    } = badge;
+    draw_panel(rect);
+    draw_rectangle(rect.x, rect.y, 4.0, rect.h, color);
+    let title_color = if unlocked { BONE } else { MUTED };
+    let status_color = if unlocked {
+        color
+    } else {
+        Color::new(color.r, color.g, color.b, 0.42)
+    };
+    let bar_color = if unlocked {
+        color
+    } else {
+        Color::new(color.r, color.g, color.b, 0.33)
+    };
+    let title_size = if rect.h < 30.0 { 10.0 } else { 12.0 };
+    let status_size = if rect.h < 30.0 { 8.0 } else { 10.0 };
+    let bar_height = rect.h.clamp(4.0, 8.0) * 0.88;
+    let bar_top = rect.y + rect.h - bar_height - 6.0;
+    let text_mid = (rect.h * 0.33).clamp(16.0, 22.0);
+    let text_bottom = (rect.h * 0.57).clamp(28.0, 36.0);
+    draw_text(name, rect.x + 11.0, text_mid, title_size, title_color);
+    let status = if unlocked {
+        format!("LV {level}")
+    } else {
+        "LOCKED".to_string()
+    };
+    draw_text(
+        &status,
+        rect.x + 11.0,
+        rect.y + (text_bottom - 1.0),
+        status_size,
+        status_color,
+    );
+    draw_bar(
+        rect.x + 9.0,
+        bar_top,
+        rect.w - 18.0,
+        bar_height,
+        charge,
+        bar_color,
         Color::new(0.0, 0.0, 0.0, 0.45),
     );
 }
