@@ -13,6 +13,8 @@ use macroquad::{
     rand,
 };
 
+pub(crate) use render::{Renderer, upgrade_at};
+
 const VIEW_HEIGHT: f32 = 720.0;
 const PLAYER_RADIUS: f32 = 18.0;
 const MAX_ENEMIES: usize = 360;
@@ -269,6 +271,10 @@ pub(crate) struct Game {
     shake: f32,
     hit_stop: f32,
     pickup_flash: f32,
+    /// Full-screen red bleed, driven by taking contact damage.
+    hurt_flash: f32,
+    /// Full-screen bloom bloom-out, driven by the Storm Lantern firing.
+    spell_flash: f32,
     kills: u32,
 }
 
@@ -304,6 +310,8 @@ impl Game {
             shake: 0.0,
             hit_stop: 0.0,
             pickup_flash: 0.0,
+            hurt_flash: 0.0,
+            spell_flash: 0.0,
             kills: 0,
         }
     }
@@ -311,6 +319,10 @@ impl Game {
     /// Advances the simulation by one frame.
     pub(crate) fn update(&mut self, dt: f32, input: Input) -> Control {
         self.visual_time += dt;
+        // Full-screen flashes decay with wall-clock time rather than simulation
+        // time, so they still fade while the game is paused.
+        self.hurt_flash = (self.hurt_flash - dt * 3.2).max(0.0);
+        self.spell_flash = (self.spell_flash - dt * 7.0).max(0.0);
 
         match self.phase {
             Phase::Title => {
@@ -324,10 +336,9 @@ impl Game {
                 }
             },
             Phase::LevelUp => {
-                let choice = input
-                    .choice
-                    .or_else(|| input.pointer.and_then(render::upgrade_at));
-                if let Some(choice) = choice.filter(|choice| *choice < self.offers.len()) {
+                // `Input::choice` already folds in the pointer hit test, so the
+                // simulation never needs to know how the cards are laid out.
+                if let Some(choice) = input.choice.filter(|choice| *choice < self.offers.len()) {
                     self.apply_upgrade(self.offers[choice]);
                     if self.player.experience >= self.player.next_level {
                         self.begin_level_up();
@@ -351,6 +362,29 @@ impl Game {
         }
 
         Control::Continue
+    }
+
+    /// Fraction of maximum health remaining, used by the vignette and HUD.
+    pub(crate) fn health_ratio(&self) -> f32 {
+        self.player.health / self.player.max_health
+    }
+
+    /// How ready the Storm Lantern is to fire, from 0 to 1.
+    pub(crate) fn storm_charge(&self) -> f32 {
+        1.0 - (self.storm_timer / self.storm.cooldown).clamp(0.0, 1.0)
+    }
+
+    /// Where the world camera is pointing this frame, shake included.
+    pub(crate) fn camera_offset(&self) -> Vec2 {
+        let shake = if self.shake > 0.0 {
+            vec2(
+                (self.visual_time * 83.0).sin(),
+                (self.visual_time * 71.0).cos(),
+            ) * self.shake
+        } else {
+            Vec2::ZERO
+        };
+        self.camera + shake
     }
 
     fn update_running(&mut self, dt: f32, movement: Vec2) {
@@ -550,6 +584,7 @@ impl Game {
         self.storm_timer = self.storm.cooldown;
         self.shake = self.shake.max(5.5);
         self.hit_stop = 0.025;
+        self.spell_flash = 1.0;
     }
 
     fn resolve_player_contact(&mut self) {
@@ -582,6 +617,7 @@ impl Game {
             self.player.invulnerability = 0.72;
             self.shake = 13.0;
             self.hit_stop = 0.055;
+            self.hurt_flash = 1.0;
             self.damage_number(self.player.position + vec2(0.0, -28.0), damage, DAMAGE_RED);
             self.burst(self.player.position, DAMAGE_RED, 12, 155.0);
         }
