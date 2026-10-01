@@ -24,10 +24,6 @@ description = "Run Nightfall"
 depends = ["rust:lock:check"]
 run = "cargo run --release --locked"
 
-[tasks."build:windows"]
-description = "Build the Windows executable"
-depends = ["rust:windows:build"]
-
 [tasks."play:web"]
 description = "Run Nightfall in a browser"
 depends = ["rust:web:build"]
