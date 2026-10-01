@@ -97,6 +97,31 @@ depends = ["rust:lock:check"]
 wait_for = ["rust:doc"]
 run = "cargo package --workspace --allow-dirty --locked"
 
+[tasks."rust:windows:components"]
+description = "Install the Rust Windows target"
+run = """
+set -eu
+rustup target add x86_64-pc-windows-gnu
+"""
+
+[tasks."rust:windows:check"]
+description = "Type-check the Windows build"
+depends = ["rust:windows:components", "rust:lock:check"]
+run = "cargo check --workspace --all-features --target x86_64-pc-windows-gnu --locked"
+
+[tasks."rust:windows:build"]
+description = "Build the Windows executable"
+depends = ["rust:windows:components", "rust:lock:check"]
+run = """
+set -eu
+# Copy the result into target/windows/ so the build output has one obvious home
+# and the triple-cross-compiled path is not mistaken for the shipped artifact.
+cargo build --release --target x86_64-pc-windows-gnu --locked
+mkdir -p target/windows
+cp target/x86_64-pc-windows-gnu/release/nightfall.exe target/windows/nightfall.exe
+echo "Nightfall for Windows: target/windows/nightfall.exe"
+"""
+
 [tasks."rust:web:check"]
 description = "Check the browser build"
 depends = ["rust:web:build"]

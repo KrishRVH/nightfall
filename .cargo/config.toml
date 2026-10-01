@@ -1,3 +1,8 @@
 # Macroquad's WebGL symbols are supplied by mq_js_bundle.js at runtime.
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "link-arg=--allow-undefined"]
+
+# Nightfall is a game, so the Windows build links as a GUI application and opens
+# no console window.
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-arg=-Wl,--subsystem,windows"]

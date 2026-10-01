@@ -17,6 +17,7 @@ Read `README.md` before making gameplay or architectural changes.
 
 - `mise run play`: run the game.
 - `mise run play:web`: run the game in a browser.
+- `mise run build:windows`: cross-compile the Windows executable.
 - `mise run standards`: format the project.
 - `mise run standards:check`: run the complete local CI gate.
 

@@ -9,7 +9,7 @@ readme = "README.md"
 publish = false
 
 [dependencies]
-macroquad = { version = "0.4.15", default-features = false }
+macroquad = { version = "0.4.16", default-features = false }
 
 # Practical strict-by-default linting baseline.
 [lints.rust]

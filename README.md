@@ -1,7 +1,7 @@
 # Nightfall
 
 An asset-free, Vampire Survivors-style teaching game built with Rust 2024 and
-Macroquad 0.4.15. Everything on screen is generated in code, so the repository
+Macroquad 0.4.16. Everything on screen is generated in code, so the repository
 stays focused on readable game-loop and gameplay code.
 
 ## Play
@@ -19,6 +19,15 @@ mise run play:web
 
 The browser build pairs the WASM binary with the WebGL runtime from the locked
 Miniquad package, then serves both locally.
+
+## Windows
+
+```sh
+mise run build:windows
+```
+
+Cross-compiles to `target/windows/nightfall.exe` with the MinGW toolchain. The
+build links as a GUI application, so it opens no console window.
 
 Move with WASD or the arrow keys. The Moon Knives orbit automatically and the
 Storm Lantern chains lightning through nearby enemies. Choose upgrades with
