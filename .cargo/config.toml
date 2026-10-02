@@ -1,4 +1,5 @@
-# Macroquad's WebGL symbols are supplied by mq_js_bundle.js at runtime.
+# Macroquad's WebGL symbols are supplied by the locked Miniquad package's
+# runtime, copied to target/web/miniquad.js by `mise run rust:web:build`.
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "link-arg=--allow-undefined"]
 

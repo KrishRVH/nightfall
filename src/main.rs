@@ -2,8 +2,18 @@
 
 mod game;
 
-use game::{Control, Game, Input};
-use macroquad::prelude::*;
+use game::{Control, Game, Input, TextCache};
+use macroquad::{
+    input::{
+        KeyCode, MouseButton, is_key_down, is_key_pressed, is_mouse_button_pressed, mouse_position,
+    },
+    math::{Vec2, vec2},
+    miniquad::{conf::Conf, date},
+    time::get_frame_time,
+    window::{next_frame, screen_height, screen_width},
+};
+
+const MAX_FRAME_TIME: f32 = 1.0 / 30.0;
 
 fn window_conf() -> Conf {
     Conf {
@@ -25,14 +35,15 @@ fn read_input() -> Input {
     let movement = vec2(horizontal, vertical).normalize_or_zero();
 
     let choice = [KeyCode::Key1, KeyCode::Key2, KeyCode::Key3]
-        .iter()
-        .position(|key| is_key_pressed(*key));
-    let pointer = is_mouse_button_pressed(MouseButton::Left).then(|| Vec2::from(mouse_position()));
-
+        .into_iter()
+        .position(is_key_pressed);
     Input {
         movement,
         choice,
-        pointer,
+        viewport: vec2(screen_width(), screen_height()),
+        dpi_scale: macroquad::miniquad::window::dpi_scale(),
+        pointer: Vec2::from(mouse_position()),
+        click: is_mouse_button_pressed(MouseButton::Left),
         accept: is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space),
         pause: is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::P),
         retry: is_key_pressed(KeyCode::R),
@@ -41,16 +52,26 @@ fn read_input() -> Input {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let mut game = Game::new();
+    // Seed at the application seam; the simulation owns its random streams.
+    let mut game = Game::new(date::now().to_bits());
+    let mut text_cache = TextCache::default();
 
     loop {
-        // Clamp stalls instead of letting one delayed frame tunnel through collisions.
-        let dt = get_frame_time().min(1.0 / 30.0);
-        if game.update(dt, read_input()) == Control::Restart {
-            game = Game::new_running();
+        // Ignore clock rollback and cap frame time to limit collision tunneling.
+        let dt = get_frame_time().clamp(0.0, MAX_FRAME_TIME);
+        let input = read_input();
+        // Some platforms report a zero-sized surface while minimized.
+        if input.viewport.min_element() <= 0.0 {
+            next_frame().await;
+            continue;
+        }
+        // Warm graphics resources before any draw queues geometry for this frame.
+        text_cache.prepare(input.dpi_scale);
+        if game.update(dt, input) == Control::Restart {
+            game = Game::new_running(date::now().to_bits());
         }
 
-        game.draw();
+        game.draw(&input);
         next_frame().await;
     }
 }

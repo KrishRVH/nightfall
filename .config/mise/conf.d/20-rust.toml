@@ -89,7 +89,7 @@ fi
 description = "Build Rust documentation with warnings denied"
 depends = ["rust:lock:check"]
 wait_for = ["rust:test:doc"]
-run = "RUSTDOCFLAGS=\"-D warnings -D missing_docs\" cargo doc --workspace --all-features --no-deps --locked"
+run = "RUSTDOCFLAGS=\"-D warnings -D missing_docs\" cargo doc --workspace --all-features --no-deps --document-private-items --locked"
 
 [tasks."rust:package"]
 description = "Validate Rust package contents"
@@ -114,9 +114,8 @@ description = "Build the Windows executable"
 depends = ["rust:windows:components", "rust:lock:check"]
 run = """
 set -eu
-# Copy the result into target/windows/ so the build output has one obvious home
-# and the triple-cross-compiled path is not mistaken for the shipped artifact.
-cargo build --release --target x86_64-pc-windows-gnu --locked
+# Keep the distributable executable at the documented output path.
+cargo build --release --target x86_64-pc-windows-gnu --target-dir target --locked
 mkdir -p target/windows
 cp target/x86_64-pc-windows-gnu/release/nightfall.exe target/windows/nightfall.exe
 echo "Nightfall for Windows: target/windows/nightfall.exe"
@@ -132,7 +131,7 @@ description = "Build browser-ready Nightfall files"
 depends = ["rust:lock:check", "rust:web:components"]
 run = """
 set -eu
-cargo build --release --target wasm32-unknown-unknown --locked
+cargo build --release --target wasm32-unknown-unknown --target-dir target --locked
 # Optional Macroquad plugins are disabled, so package Miniquad's core runtime.
 miniquad_runtime="$(
   cargo metadata --format-version=1 --locked |
@@ -168,5 +167,6 @@ depends = [
   "rust:doc",
   "rust:package",
   "rust:web:check",
+  "rust:windows:check",
   "rust:deny",
 ]

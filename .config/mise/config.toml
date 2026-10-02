@@ -89,5 +89,7 @@ source_version="${SYFT_SOURCE_VERSION:-0.0.0}"
 export SYFT_CHECK_FOR_APP_UPDATE="${SYFT_CHECK_FOR_APP_UPDATE:-false}"
 rm -rf sbom
 mkdir -p sbom
-syft scan dir:. --source-name "$source_name" --source-version "$source_version" --exclude ./sbom --exclude ./.git --output cyclonedx-json=sbom/sbom.cdx.json
+syft scan dir:. --source-name "$source_name" --source-version "$source_version" \
+  --exclude ./sbom --exclude ./.git --exclude ./target --exclude ./.cargo-tools --exclude ./.cache \
+  --output cyclonedx-json=sbom/sbom.cdx.json
 """

@@ -2,21 +2,25 @@
 //!
 //! [`Game::update`] is the central teaching path: it applies input, enemy AI,
 //! weapon damage, deaths, pickups, and effects in an explicit order. Drawing
-//! lives in the private `render` child module and cannot mutate this state.
+//! lives in the private `render` child module and only reads simulation state.
 
 mod render;
+
+pub(crate) use render::TextCache;
 
 use std::f32::consts::TAU;
 
 use macroquad::{
-    prelude::{Color, Vec2, screen_height, screen_width, vec2},
-    rand,
+    prelude::{Color, Vec2, vec2},
+    rand::RandGenerator,
 };
 
 const VIEW_HEIGHT: f32 = 720.0;
 const PLAYER_RADIUS: f32 = 18.0;
 const MAX_ENEMIES: usize = 360;
 const DAMAGE_NUMBER_LIFE: f32 = 0.62;
+const LIGHTNING_LIFE: f32 = 0.18;
+const PICKUP_FLASH_LIFE: f32 = 0.24;
 const ENEMY_SEPARATION_RATE: f32 = 27.0;
 
 const INK: Color = Color::new(0.07, 0.055, 0.12, 1.0);
@@ -29,14 +33,46 @@ const DAMAGE_RED: Color = Color::new(0.94, 0.25, 0.32, 1.0);
 const GEM_GREEN: Color = Color::new(0.35, 0.87, 0.52, 1.0);
 
 /// A frame of device input translated into game concepts.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Input actions are independent button edges; mutually exclusive state lives in Phase"
+)]
 pub(crate) struct Input {
+    /// Desired movement direction, normalized by the application.
     pub(crate) movement: Vec2,
+    /// Keyboard upgrade selection, indexed from zero.
     pub(crate) choice: Option<usize>,
-    pub(crate) pointer: Option<Vec2>,
+    /// Cursor position in screen coordinates, also used for menu hover.
+    pub(crate) pointer: Vec2,
+    /// Positive screen dimensions in the same coordinates as the cursor.
+    pub(crate) viewport: Vec2,
+    /// Physical pixels per screen coordinate, used to prepare font glyphs.
+    pub(crate) dpi_scale: f32,
+    /// Whether the primary pointer button was pressed this frame.
+    pub(crate) click: bool,
+    /// Whether the player pressed the confirm action this frame.
     pub(crate) accept: bool,
+    /// Whether the player pressed the pause action this frame.
     pub(crate) pause: bool,
+    /// Whether the player pressed the retry action this frame.
     pub(crate) retry: bool,
+}
+
+impl Default for Input {
+    fn default() -> Self {
+        Self {
+            movement: Vec2::ZERO,
+            choice: None,
+            pointer: Vec2::ZERO,
+            viewport: vec2(1280.0, VIEW_HEIGHT),
+            dpi_scale: 1.0,
+            click: false,
+            accept: false,
+            pause: false,
+            retry: false,
+        }
+    }
 }
 
 /// A request for the outer application loop.
@@ -50,12 +86,12 @@ pub(crate) enum Control {
 enum Phase {
     Title,
     Running,
-    LevelUp,
+    LevelUp([Upgrade; 3]),
     Paused,
     GameOver,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 struct Player {
     position: Vec2,
     velocity: Vec2,
@@ -87,7 +123,7 @@ impl Player {
         }
     }
 
-    fn lantern_position(self) -> Vec2 {
+    fn lantern_position(&self) -> Vec2 {
         self.position + vec2(-self.facing * 20.0, 2.0)
     }
 }
@@ -134,7 +170,7 @@ impl StormLantern {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EnemyKind {
     Shade,
     Wisp,
@@ -182,7 +218,7 @@ impl EnemyKind {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 struct Enemy {
     kind: EnemyKind,
     position: Vec2,
@@ -195,14 +231,14 @@ struct Enemy {
     phase: f32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 struct Gem {
     position: Vec2,
     velocity: Vec2,
     value: u32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 struct Particle {
     position: Vec2,
     velocity: Vec2,
@@ -212,13 +248,13 @@ struct Particle {
     color: Color,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct Lightning {
     points: Vec<Vec2>,
     life: f32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 struct DamageNumber {
     position: Vec2,
     value: u32,
@@ -250,6 +286,9 @@ impl Upgrade {
 
 /// The complete mutable state of one run.
 pub(crate) struct Game {
+    // Separate streams keep changes to cosmetic effects from changing gameplay.
+    rng: RandGenerator,
+    effects_rng: RandGenerator,
     phase: Phase,
     player: Player,
     moon: MoonKnives,
@@ -259,7 +298,6 @@ pub(crate) struct Game {
     particles: Vec<Particle>,
     lightning: Vec<Lightning>,
     damage_numbers: Vec<DamageNumber>,
-    offers: [Upgrade; 3],
     elapsed: f32,
     visual_time: f32,
     spawn_timer: f32,
@@ -274,27 +312,33 @@ pub(crate) struct Game {
 
 impl Game {
     /// Creates a fresh run on its title screen.
-    pub(crate) fn new() -> Self {
-        Self::with_phase(Phase::Title)
+    pub(crate) fn new(seed: u64) -> Self {
+        Self::with_phase(Phase::Title, seed)
     }
 
     /// Creates a fresh run that starts immediately.
-    pub(crate) fn new_running() -> Self {
-        Self::with_phase(Phase::Running)
+    pub(crate) fn new_running(seed: u64) -> Self {
+        Self::with_phase(Phase::Running, seed)
     }
 
-    fn with_phase(phase: Phase) -> Self {
+    fn with_phase(phase: Phase, seed: u64) -> Self {
+        let rng = RandGenerator::new();
+        rng.srand(seed);
+        let effects_rng = RandGenerator::new();
+        effects_rng.srand(seed ^ 0x9e37_79b9_7f4a_7c15);
+
         Self {
+            rng,
+            effects_rng,
             phase,
             player: Player::new(),
             moon: MoonKnives::new(),
             storm: StormLantern::new(),
-            enemies: Vec::with_capacity(256),
+            enemies: Vec::with_capacity(MAX_ENEMIES),
             gems: Vec::with_capacity(128),
             particles: Vec::with_capacity(512),
             lightning: Vec::with_capacity(8),
             damage_numbers: Vec::with_capacity(32),
-            offers: [Upgrade::ExtraKnife, Upgrade::FastStorm, Upgrade::Fleet],
             elapsed: 0.0,
             visual_time: 0.0,
             spawn_timer: 0.05,
@@ -309,12 +353,17 @@ impl Game {
     }
 
     /// Advances the simulation by one frame.
+    ///
+    /// `dt` is finite, nonnegative seconds, capped by the application to avoid
+    /// tunneling through collisions after a long frame. All device and viewport
+    /// state enters through `input`; this method requires no graphics context.
     pub(crate) fn update(&mut self, dt: f32, input: Input) -> Control {
+        debug_assert!(dt.is_finite() && dt >= 0.0);
         self.visual_time += dt;
 
         match self.phase {
             Phase::Title => {
-                if input.accept || input.pointer.is_some() {
+                if input.accept || input.click {
                     self.phase = Phase::Running;
                 }
             },
@@ -323,12 +372,15 @@ impl Game {
                     self.phase = Phase::Running;
                 }
             },
-            Phase::LevelUp => {
-                let choice = input
-                    .choice
-                    .or_else(|| input.pointer.and_then(render::upgrade_at));
-                if let Some(choice) = choice.filter(|choice| *choice < self.offers.len()) {
-                    self.apply_upgrade(self.offers[choice]);
+            Phase::LevelUp(offers) => {
+                let choice = input.choice.or_else(|| {
+                    input
+                        .click
+                        .then(|| render::upgrade_at(input.pointer, input.viewport))
+                        .flatten()
+                });
+                if let Some(choice) = choice.filter(|choice| *choice < offers.len()) {
+                    self.apply_upgrade(offers[choice]);
                     if self.player.experience >= self.player.next_level {
                         self.begin_level_up();
                     } else {
@@ -337,7 +389,7 @@ impl Game {
                 }
             },
             Phase::GameOver => {
-                if input.retry || input.accept || input.pointer.is_some() {
+                if input.retry || input.accept || input.click {
                     return Control::Restart;
                 }
             },
@@ -345,7 +397,7 @@ impl Game {
                 if input.pause {
                     self.phase = Phase::Paused;
                 } else {
-                    self.update_running(dt, input.movement);
+                    self.update_running(dt, input.movement, input.viewport);
                 }
             },
         }
@@ -353,11 +405,16 @@ impl Game {
         Control::Continue
     }
 
-    fn update_running(&mut self, dt: f32, movement: Vec2) {
+    fn update_running(&mut self, dt: f32, movement: Vec2, viewport: Vec2) {
         // Hit stop freezes gameplay but lets short-lived impact effects finish.
-        if self.hit_stop > 0.0 {
-            self.hit_stop = (self.hit_stop - dt).max(0.0);
-            self.update_effects(dt);
+        // Consume only the stopped portion so the duration does not depend on refresh rate.
+        let stopped_dt = self.hit_stop.min(dt);
+        self.hit_stop -= stopped_dt;
+        if stopped_dt > 0.0 {
+            self.update_effects(stopped_dt);
+        }
+        let dt = dt - stopped_dt;
+        if dt == 0.0 {
             return;
         }
 
@@ -370,7 +427,7 @@ impl Game {
 
         // This order is intentional: both weapons resolve before dead enemies drop XP.
         self.update_player(dt, movement);
-        self.spawn_enemies(dt);
+        self.spawn_enemies(dt, viewport);
         self.update_enemies(dt);
         self.resolve_moon_knives();
         self.resolve_storm_lantern();
@@ -391,15 +448,15 @@ impl Game {
 
     fn update_player(&mut self, dt: f32, movement: Vec2) {
         let target_velocity = movement * self.player.speed;
-        let acceleration = smoothing_weight(18.0, dt);
-        self.player.velocity = self.player.velocity.lerp(target_velocity, acceleration);
+        let velocity_weight = smoothing_weight(18.0, dt);
+        self.player.velocity = self.player.velocity.lerp(target_velocity, velocity_weight);
         self.player.position += self.player.velocity * dt;
         if movement.x.abs() > 0.1 {
             self.player.facing = movement.x.signum();
         }
     }
 
-    fn spawn_enemies(&mut self, dt: f32) {
+    fn spawn_enemies(&mut self, dt: f32, viewport: Vec2) {
         self.spawn_timer -= dt;
         let mut spawned = 0;
         // Catch up after a slow frame, but cap the work to prevent a spawn spiral.
@@ -410,7 +467,7 @@ impl Game {
                 continue;
             }
 
-            let roll = rand::gen_range(0.0, 1.0);
+            let roll = self.rng.gen_range(0.0, 1.0);
             let kind = if self.elapsed > 65.0 && roll < 0.12 {
                 EnemyKind::Brute
             } else if self.elapsed > 22.0 && roll < 0.34 {
@@ -418,9 +475,11 @@ impl Game {
             } else {
                 EnemyKind::Shade
             };
-            let angle = rand::gen_range(0.0, TAU);
-            let spawn_radius = spawn_distance(view_width());
-            let position = self.player.position + Vec2::from_angle(angle) * spawn_radius;
+            let angle = self.rng.gen_range(0.0, TAU);
+            // Clear both the current viewport and its movement toward the player.
+            let spawn_radius =
+                spawn_distance(view_width(viewport)) + self.player.position.distance(self.camera);
+            let position = self.camera + Vec2::from_angle(angle) * spawn_radius;
             let health_scale = 1.0 + self.elapsed / 150.0;
 
             self.enemies.push(Enemy {
@@ -431,12 +490,13 @@ impl Game {
                 radius: kind.radius(),
                 flash: 0.0,
                 moon_immunity: 0.0,
-                phase: rand::gen_range(0.0, TAU),
+                phase: self.rng.gen_range(0.0, TAU),
             });
         }
     }
 
     fn update_enemies(&mut self, dt: f32) {
+        let steering = smoothing_weight(8.0, dt);
         for enemy in &mut self.enemies {
             enemy.flash = (enemy.flash - dt).max(0.0);
             enemy.moon_immunity = (enemy.moon_immunity - dt).max(0.0);
@@ -450,7 +510,6 @@ impl Game {
                 EnemyKind::Shade | EnemyKind::Brute => direction,
             };
             let desired_velocity = desired_direction * enemy.kind.speed();
-            let steering = smoothing_weight(8.0, dt);
             enemy.velocity = enemy.velocity.lerp(desired_velocity, steering);
             enemy.position += enemy.velocity * dt;
         }
@@ -461,7 +520,7 @@ impl Game {
     fn separate_enemies(enemies: &mut [Enemy], dt: f32) {
         // Split a frame-rate-independent overlap correction equally between both enemies.
         let correction = smoothing_weight(ENEMY_SEPARATION_RATE, dt) * 0.5;
-        // ponytail: The bounded enemy count keeps this pairwise pass simpler than spatial bins.
+        // The bounded enemy count keeps this pairwise pass simpler than spatial bins.
         // `split_at_mut` visits each pair once while proving the borrows cannot overlap.
         for left_index in 0..enemies.len() {
             let (left, right) = enemies.split_at_mut(left_index + 1);
@@ -470,12 +529,19 @@ impl Game {
                 let offset = second.position - first.position;
                 let distance_squared = offset.length_squared();
                 let minimum = (first.radius + second.radius) * 0.72;
-                if distance_squared > 0.01 && distance_squared < minimum * minimum {
-                    let distance = distance_squared.sqrt();
-                    let push = offset / distance * (minimum - distance);
-                    first.position -= push * correction;
-                    second.position += push * correction;
+                if distance_squared >= minimum * minimum {
+                    continue;
                 }
+                let distance = distance_squared.sqrt();
+                // Coincident centers have no direction; choose a stable axis.
+                let direction = if distance > 0.0 {
+                    offset / distance
+                } else {
+                    Vec2::X
+                };
+                let push = direction * (minimum - distance);
+                first.position -= push * correction;
+                second.position += push * correction;
             }
         }
     }
@@ -531,10 +597,11 @@ impl Game {
         let mut points = Vec::with_capacity(targets.len() + 1);
         points.push(self.player.lantern_position());
         let mut hits = Vec::with_capacity(targets.len());
-        for (jump, index) in targets.into_iter().enumerate() {
+        let mut falloff = 1.0;
+        for index in targets {
             let enemy = &mut self.enemies[index];
-            let falloff = 0.88_f32.powi(jump as i32);
             let damage = self.storm.damage * falloff;
+            falloff *= 0.88;
             enemy.health -= damage;
             enemy.flash = 0.13;
             enemy.velocity += (enemy.position - self.player.position).normalize_or_zero() * 55.0;
@@ -542,7 +609,10 @@ impl Game {
             hits.push((enemy.position, damage));
         }
 
-        self.lightning.push(Lightning { points, life: 0.18 });
+        self.lightning.push(Lightning {
+            points,
+            life: LIGHTNING_LIFE,
+        });
         for (position, damage) in hits {
             self.damage_number(position, damage, STORM_CYAN);
             self.burst(position, STORM_CYAN, 4, 75.0);
@@ -559,21 +629,19 @@ impl Game {
 
         let closest = self
             .enemies
-            .iter()
-            .enumerate()
-            .filter(|(_, enemy)| {
+            .iter_mut()
+            .filter(|enemy| enemy.health > 0.0)
+            .filter(|enemy| {
                 let contact = PLAYER_RADIUS + enemy.radius;
                 enemy.position.distance_squared(self.player.position) < contact * contact
             })
-            .min_by(|(_, left), (_, right)| {
+            .min_by(|left, right| {
                 left.position
                     .distance_squared(self.player.position)
                     .total_cmp(&right.position.distance_squared(self.player.position))
-            })
-            .map(|(index, _)| index);
+            });
 
-        if let Some(index) = closest {
-            let enemy = &mut self.enemies[index];
+        if let Some(enemy) = closest {
             let away = (self.player.position - enemy.position).normalize_or_zero();
             let damage = enemy.kind.contact_damage();
             self.player.health -= damage;
@@ -589,16 +657,15 @@ impl Game {
 
     fn remove_defeated_enemies(&mut self) {
         // Walk backward because `swap_remove` changes the element at the current index.
-        let mut index = self.enemies.len();
-        while index > 0 {
-            index -= 1;
+        for index in (0..self.enemies.len()).rev() {
             if self.enemies[index].health > 0.0 {
                 continue;
             }
             let enemy = self.enemies.swap_remove(index);
             self.gems.push(Gem {
                 position: enemy.position,
-                velocity: Vec2::from_angle(rand::gen_range(0.0, TAU)) * rand::gen_range(35.0, 75.0),
+                velocity: Vec2::from_angle(self.rng.gen_range(0.0, TAU))
+                    * self.rng.gen_range(35.0, 75.0),
                 value: enemy.kind.experience(),
             });
             self.burst(enemy.position, ARCANE_VIOLET, 9, 130.0);
@@ -607,10 +674,9 @@ impl Game {
     }
 
     fn collect_gems(&mut self, dt: f32) {
+        let damping = (-3.2 * dt).exp();
         let mut gained = 0;
-        let mut index = self.gems.len();
-        while index > 0 {
-            index -= 1;
+        for index in (0..self.gems.len()).rev() {
             let gem = &mut self.gems[index];
             let offset = self.player.position - gem.position;
             let distance = offset.length();
@@ -618,21 +684,21 @@ impl Game {
                 let pull = 560.0 + (self.player.pickup_radius - distance) * 7.0;
                 gem.velocity += offset.normalize_or_zero() * pull * dt;
             }
-            gem.velocity *= (-3.2 * dt).exp();
+            gem.velocity *= damping;
             gem.position += gem.velocity * dt;
 
-            if distance < PLAYER_RADIUS + 8.0 {
+            if gem.position.distance_squared(self.player.position) < (PLAYER_RADIUS + 8.0).powi(2) {
                 gained += gem.value;
                 self.gems.swap_remove(index);
             }
         }
 
         if gained > 0 {
-            self.pickup_flash = 0.24;
+            self.pickup_flash = PICKUP_FLASH_LIFE;
             self.burst(
                 self.player.position,
                 GEM_GREEN,
-                gained.clamp(2, 7) as usize,
+                gained.min(7) as usize,
                 65.0,
             );
         }
@@ -647,8 +713,7 @@ impl Game {
         self.player.experience -= self.player.next_level;
         self.player.level += 1;
         self.player.next_level = 8 + self.player.level * 4 + self.player.level.pow(2) / 3;
-        self.offers = random_offers();
-        self.phase = Phase::LevelUp;
+        self.phase = Phase::LevelUp(random_offers(&self.rng));
     }
 
     fn apply_upgrade(&mut self, upgrade: Upgrade) {
@@ -689,10 +754,11 @@ impl Game {
     }
 
     fn update_effects(&mut self, dt: f32) {
+        let damping = (-4.5 * dt).exp();
         for particle in &mut self.particles {
             particle.life -= dt;
             particle.position += particle.velocity * dt;
-            particle.velocity *= (-4.5 * dt).exp();
+            particle.velocity *= damping;
         }
         self.particles.retain(|particle| particle.life > 0.0);
 
@@ -710,14 +776,14 @@ impl Game {
 
     fn burst(&mut self, position: Vec2, color: Color, count: usize, speed: f32) {
         for _ in 0..count {
-            let life = rand::gen_range(0.16, 0.34);
+            let life = self.effects_rng.gen_range(0.16, 0.34);
             self.particles.push(Particle {
                 position,
-                velocity: Vec2::from_angle(rand::gen_range(0.0, TAU))
-                    * rand::gen_range(speed * 0.45, speed),
+                velocity: Vec2::from_angle(self.effects_rng.gen_range(0.0, TAU))
+                    * self.effects_rng.gen_range(speed * 0.45, speed),
                 life,
                 max_life: life,
-                size: rand::gen_range(2.0, 5.0),
+                size: self.effects_rng.gen_range(2.0, 5.0),
                 color,
             });
         }
@@ -735,6 +801,7 @@ impl Game {
 
 /// Starts within lantern range, then follows shorter nearest-neighbor jumps.
 fn chain_targets(enemies: &[Enemy], origin: Vec2, initial_range: f32, count: usize) -> Vec<usize> {
+    let count = count.min(enemies.len());
     let mut targets = Vec::with_capacity(count);
     let mut current = origin;
     let mut range = initial_range;
@@ -763,8 +830,8 @@ fn chain_targets(enemies: &[Enemy], origin: Vec2, initial_range: f32, count: usi
     targets
 }
 
-fn random_offers() -> [Upgrade; 3] {
-    Upgrade::SCHOOLS.map(|school| school[rand::gen_range(0, school.len())])
+fn random_offers(rng: &RandGenerator) -> [Upgrade; 3] {
+    Upgrade::SCHOOLS.map(|school| school[rng.gen_range(0, school.len())])
 }
 
 fn spawn_interval(elapsed: f32) -> f32 {
@@ -776,14 +843,14 @@ fn spawn_distance(width: f32) -> f32 {
     width.hypot(VIEW_HEIGHT) * 0.5 + 54.0
 }
 
-fn view_width() -> f32 {
+fn view_width(viewport: Vec2) -> f32 {
     // The world stays 720 units tall while widening with the window's aspect ratio.
-    VIEW_HEIGHT * screen_width() / screen_height().max(1.0)
+    VIEW_HEIGHT * viewport.x / viewport.y
 }
 
 fn smoothing_weight(rate: f32, dt: f32) -> f32 {
     // Exponential smoothing converges at the same rate regardless of frame rate.
-    1.0 - (-rate * dt).exp()
+    -(-rate * dt).exp_m1()
 }
 
 fn format_time(seconds: f32) -> String {
@@ -809,7 +876,7 @@ mod tests {
     }
 
     fn player_y_after_one_second(movement_y: f32, frame_rate: usize) -> f32 {
-        let mut game = Game::new_running();
+        let mut game = Game::new_running(1);
         game.spawn_timer = f32::INFINITY;
         let input = Input {
             movement: vec2(0.0, movement_y),
@@ -835,6 +902,307 @@ mod tests {
         enemies[0].position.distance(enemies[1].position)
     }
 
+    fn game_without_spawning() -> Game {
+        let mut game = Game::new_running(1);
+        game.spawn_timer = f32::INFINITY;
+        game.storm_timer = f32::INFINITY;
+        game
+    }
+
+    fn enemy_states(game: &Game) -> Vec<(EnemyKind, Vec2, Vec2, f32, f32)> {
+        game.enemies
+            .iter()
+            .map(|enemy| {
+                (
+                    enemy.kind,
+                    enemy.position,
+                    enemy.velocity,
+                    enemy.health,
+                    enemy.phase,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn complete_updates_spawn_without_a_graphics_context_and_keep_runs_independent() {
+        let mut expected = Game::new_running(42);
+        let mut actual = Game::new_running(42);
+        let mut unrelated = Game::new_running(99);
+
+        for _ in 0..120 {
+            expected.update(1.0 / 60.0, Input::default());
+            unrelated.update(1.0 / 60.0, Input::default());
+            actual.update(1.0 / 60.0, Input::default());
+        }
+
+        assert!(!actual.enemies.is_empty());
+        assert_eq!(enemy_states(&actual), enemy_states(&expected));
+        assert_ne!(enemy_states(&actual), enemy_states(&unrelated));
+        assert_eq!(random_offers(&actual.rng), random_offers(&expected.rng));
+    }
+
+    #[test]
+    fn cosmetic_randomness_does_not_change_spawns_or_upgrade_offers() {
+        let mut expected = Game::new_running(42);
+        let mut actual = Game::new_running(42);
+
+        for _ in 0..120 {
+            actual.burst(Vec2::ZERO, MOON_GOLD, 1, 10.0);
+            expected.update(1.0 / 60.0, Input::default());
+            actual.update(1.0 / 60.0, Input::default());
+        }
+
+        assert_eq!(enemy_states(&actual), enemy_states(&expected));
+        assert_eq!(random_offers(&actual.rng), random_offers(&expected.rng));
+    }
+
+    #[test]
+    fn moon_defeated_enemies_cannot_deal_contact_damage_in_the_same_frame() {
+        let mut game = game_without_spawning();
+        game.moon.radius = 0.0;
+        game.enemies.push(enemy_at(0.0, 0.0));
+
+        game.update(1.0 / 60.0, Input::default());
+
+        assert_eq!(
+            game.player.health.to_bits(),
+            game.player.max_health.to_bits()
+        );
+        assert!(game.enemies.is_empty());
+        assert_eq!(game.kills, 1);
+    }
+
+    #[test]
+    fn storm_defeated_enemies_cannot_deal_contact_damage_in_the_same_frame() {
+        let mut game = game_without_spawning();
+        game.storm_timer = 0.0;
+        game.enemies.push(enemy_at(0.0, 0.0));
+
+        game.update(1.0 / 60.0, Input::default());
+
+        assert_eq!(
+            game.player.health.to_bits(),
+            game.player.max_health.to_bits()
+        );
+        assert!(game.enemies.is_empty());
+        assert_eq!(game.kills, 1);
+    }
+
+    #[test]
+    fn gem_entering_pickup_range_is_collected_in_the_same_frame() {
+        let mut game = game_without_spawning();
+        game.gems.push(Gem {
+            position: vec2(27.0, 0.0),
+            velocity: vec2(-150.0, 0.0),
+            value: 3,
+        });
+
+        game.update(1.0 / 60.0, Input::default());
+
+        assert!(game.gems.is_empty());
+        assert_eq!(game.player.experience, 3);
+    }
+
+    #[test]
+    fn hit_stop_consumes_only_its_remaining_duration_and_advances_effects() {
+        let mut game = game_without_spawning();
+        game.hit_stop = 0.025;
+        game.damage_numbers.push(DamageNumber {
+            position: Vec2::ZERO,
+            value: 1,
+            life: 0.5,
+            color: MOON_GOLD,
+        });
+
+        game.update(0.03, Input::default());
+
+        assert!(game.hit_stop.abs() < f32::EPSILON);
+        assert!((game.elapsed - 0.005).abs() < f32::EPSILON);
+        assert!((game.damage_numbers[0].life - 0.47).abs() < f32::EPSILON);
+        assert!((game.damage_numbers[0].position.y + 34.0 * 0.03).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn hit_stop_duration_is_stable_at_high_frame_rates() {
+        let elapsed_after_one_second = |frame_rate: usize| {
+            let mut game = game_without_spawning();
+            game.hit_stop = 0.025;
+            for _ in 0..frame_rate {
+                game.update(1.0 / frame_rate as f32, Input::default());
+            }
+            game.elapsed
+        };
+
+        assert!((elapsed_after_one_second(60) - 0.975).abs() < 0.000_01);
+        assert!((elapsed_after_one_second(400) - 0.975).abs() < 0.000_01);
+    }
+
+    #[test]
+    fn coincident_enemies_separate_without_invalid_coordinates() {
+        let mut game = game_without_spawning();
+        game.enemies = vec![enemy_at(0.0, 0.0), enemy_at(0.0, 0.0)];
+
+        game.update(1.0 / 60.0, Input::default());
+
+        assert!(game.enemies[0].position.is_finite());
+        assert!(game.enemies[1].position.is_finite());
+        assert!(
+            game.enemies[0]
+                .position
+                .distance_squared(game.enemies[1].position)
+                > 0.0
+        );
+        assert_eq!(
+            game.enemies[0].position + game.enemies[1].position,
+            Vec2::ZERO
+        );
+    }
+
+    #[test]
+    fn enemies_spawn_outside_the_viewport_even_while_the_camera_catches_up() {
+        let input = Input {
+            viewport: vec2(1920.0, 720.0),
+            ..Input::default()
+        };
+        let half_viewport = vec2(view_width(input.viewport), VIEW_HEIGHT) * 0.5;
+
+        for seed in 0..32 {
+            let mut game = Game::new_running(seed);
+            game.player.position = vec2(2000.0, 1000.0);
+            game.spawn_timer = 0.0;
+
+            game.update(1.0 / 30.0, input);
+
+            assert_eq!(game.enemies.len(), 1);
+            let enemy = &game.enemies[0];
+            let offset = enemy.position - game.camera;
+            assert!(
+                offset.x.abs() > half_viewport.x + enemy.radius
+                    || offset.y.abs() > half_viewport.y + enemy.radius
+            );
+        }
+    }
+
+    #[test]
+    fn lethal_contact_ends_the_run_and_game_over_freezes_gameplay() {
+        let mut game = game_without_spawning();
+        game.player.health = 1.0;
+        game.enemies.push(enemy_at(0.0, 0.0));
+
+        game.update(1.0 / 60.0, Input::default());
+
+        assert_eq!(game.phase, Phase::GameOver);
+        assert_eq!(game.player.health.to_bits(), 0.0_f32.to_bits());
+        let elapsed = game.elapsed.to_bits();
+        let position = game.player.position;
+
+        // Check beyond the lethal hit's hit stop, which also freezes a running game.
+        for _ in 0..6 {
+            game.update(
+                1.0 / 60.0,
+                Input {
+                    movement: Vec2::X,
+                    ..Input::default()
+                },
+            );
+        }
+
+        assert_eq!(game.elapsed.to_bits(), elapsed);
+        assert_eq!(game.player.position, position);
+        assert_eq!(
+            game.update(
+                1.0 / 60.0,
+                Input {
+                    accept: true,
+                    ..Input::default()
+                },
+            ),
+            Control::Restart
+        );
+    }
+
+    #[test]
+    fn phases_only_advance_on_their_corresponding_input_actions() {
+        let mut game = Game::new(1);
+        let dt = 1.0 / 60.0;
+
+        game.update(dt, Input::default());
+        assert_eq!(game.phase, Phase::Title);
+        game.update(
+            dt,
+            Input {
+                click: true,
+                ..Input::default()
+            },
+        );
+        assert_eq!(game.phase, Phase::Running);
+
+        let pause = Input {
+            pause: true,
+            ..Input::default()
+        };
+        game.update(dt, pause);
+        assert_eq!(game.phase, Phase::Paused);
+        let elapsed = game.elapsed;
+        game.update(dt, Input::default());
+        assert_eq!(game.elapsed.to_bits(), elapsed.to_bits());
+        game.update(dt, pause);
+        assert_eq!(game.phase, Phase::Running);
+
+        game.phase = Phase::GameOver;
+        assert_eq!(game.update(dt, Input::default()), Control::Continue);
+        assert_eq!(
+            game.update(
+                dt,
+                Input {
+                    retry: true,
+                    ..Input::default()
+                },
+            ),
+            Control::Restart
+        );
+    }
+
+    #[test]
+    fn invalid_upgrade_choices_do_not_advance_and_leftover_experience_is_preserved() {
+        let mut game = game_without_spawning();
+        game.gems.push(Gem {
+            position: Vec2::ZERO,
+            velocity: Vec2::ZERO,
+            value: 100,
+        });
+
+        game.update(1.0 / 60.0, Input::default());
+
+        assert!(matches!(game.phase, Phase::LevelUp(_)));
+        assert_eq!(game.player.level, 2);
+        assert_eq!(game.player.experience, 91);
+
+        game.update(
+            1.0 / 60.0,
+            Input {
+                choice: Some(3),
+                ..Input::default()
+            },
+        );
+        assert!(matches!(game.phase, Phase::LevelUp(_)));
+        assert_eq!(game.player.level, 2);
+        assert_eq!(game.player.experience, 91);
+
+        let next_level = game.player.next_level;
+        game.update(
+            1.0 / 60.0,
+            Input {
+                choice: Some(0),
+                ..Input::default()
+            },
+        );
+        assert!(matches!(game.phase, Phase::LevelUp(_)));
+        assert_eq!(game.player.level, 3);
+        assert_eq!(game.player.experience, 91 - next_level);
+    }
+
     #[test]
     fn lightning_chains_through_nearest_living_enemies_without_repeats() {
         let enemies = [
@@ -853,7 +1221,7 @@ mod tests {
 
     #[test]
     fn extra_knife_adds_one_blade_without_changing_storm() {
-        let mut game = Game::new_running();
+        let mut game = Game::new_running(1);
         let storm_before = game.storm;
 
         game.apply_upgrade(Upgrade::ExtraKnife);
@@ -898,5 +1266,12 @@ mod tests {
         let gap_at_400_hz = enemy_gap_after_50_ms(400);
 
         assert!((gap_at_60_hz - gap_at_400_hz).abs() < 0.01);
+    }
+
+    #[test]
+    fn viewport_aspect_ratio_is_independent_of_coordinate_scale() {
+        for viewport in [vec2(1280.0, 640.0), vec2(2.0, 1.0), vec2(0.5, 0.25)] {
+            assert!((view_width(viewport) - 1440.0).abs() < f32::EPSILON);
+        }
     }
 }

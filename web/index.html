@@ -23,7 +23,20 @@
     <canvas id="glcanvas" tabindex="0" aria-label="Nightfall game"></canvas>
     <script src="miniquad.js"></script>
     <script>
-      load("nightfall.wasm");
+      (() => {
+        // Miniquad 0.4.11 caches Rust's DPI at startup. Keep canvas resizing and
+        // pointer coordinates at that same density after browser zoom changes.
+        const runtimeDpiScale = dpi_scale;
+        let sessionDpi;
+        dpi_scale = () => {
+          if (!high_dpi) return 1;
+          sessionDpi ??= runtimeDpiScale();
+          return sessionDpi;
+        };
+        // The runtime constructed its WASM import table before this wrapper.
+        importObject.env.dpi_scale = dpi_scale;
+        load("nightfall.wasm");
+      })();
     </script>
   </body>
 </html>
